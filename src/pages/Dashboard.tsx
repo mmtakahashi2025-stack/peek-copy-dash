@@ -3,10 +3,10 @@ import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { RankingCard } from '@/components/dashboard/RankingCard';
+import { ProductRankingCard } from '@/components/dashboard/ProductRankingCard';
 import { SalesEvolutionChart } from '@/components/dashboard/SalesEvolutionChart';
 import { useSheetData } from '@/contexts/SheetDataContext';
-import { AlertCircle, FileSpreadsheet } from 'lucide-react';
-
+import { FileSpreadsheet } from 'lucide-react';
 interface Filters {
   dateFrom: Date | undefined;
   dateTo: Date | undefined;
@@ -18,7 +18,7 @@ interface Filters {
 }
 
 export default function Dashboard() {
-  const { rawData, getKpis, getColaboradores, sheetUrl } = useSheetData();
+  const { rawData, getKpis, getColaboradores, getProdutos, sheetUrl } = useSheetData();
   
   const [filters, setFilters] = useState<Filters>({
     dateFrom: new Date(2024, 11, 1),
@@ -37,6 +37,7 @@ export default function Dashboard() {
   // Obter dados filtrados
   const kpis = getKpis(filters.filial);
   const colaboradores = getColaboradores(filters.filial, filters.colaborador);
+  const produtos = getProdutos(filters.filial);
 
   const hasData = rawData.length > 0;
 
@@ -77,10 +78,11 @@ export default function Dashboard() {
           ))}
         </div>
         
-        {/* Chart and Ranking Side by Side */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Chart and Rankings */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <SalesEvolutionChart filialId={filters.filial} />
           <RankingCard colaboradores={colaboradores} />
+          <ProductRankingCard produtos={produtos} />
         </div>
       </main>
     </div>
