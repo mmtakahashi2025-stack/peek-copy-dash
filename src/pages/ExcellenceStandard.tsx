@@ -439,13 +439,17 @@ export default function ExcellenceStandard() {
     return [currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
   }, []);
 
-  const getEvaluationIcon = (evaluation: Evaluation | null) => {
+  const getEvaluationDisplay = (evaluation: Evaluation | null) => {
     if (!evaluation) return null;
     const pct = evaluation.percentage || 0;
-    if (pct >= 85) {
-      return <CheckCircle2 className="h-4 w-4 text-success" />;
-    }
-    return <XCircle className="h-4 w-4 text-destructive" />;
+    return (
+      <span className={cn(
+        "text-xs font-medium",
+        pct >= 85 ? "text-success" : "text-destructive"
+      )}>
+        {pct.toFixed(0)}%
+      </span>
+    );
   };
 
   if (authLoading) {
@@ -608,7 +612,7 @@ export default function ExcellenceStandard() {
                                         )}
                                       >
                                         {evaluation ? (
-                                          getEvaluationIcon(evaluation)
+                                          getEvaluationDisplay(evaluation)
                                         ) : (
                                           <Plus className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 hover:opacity-100" />
                                         )}
