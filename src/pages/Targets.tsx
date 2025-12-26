@@ -9,10 +9,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ArrowLeft, Save, Loader2, Copy, CalendarRange } from 'lucide-react';
+import { Save, Loader2, Copy, CalendarRange } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
-import comboLogo from '@/assets/combo-iguassu-logo.png';
+import { SecondaryHeader } from '@/components/layout/SecondaryHeader';
 
 // Validation schema for KPI target values
 const kpiTargetSchema = z.number()
@@ -204,15 +204,7 @@ export default function Targets() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b bg-card px-4 py-3">
-        <div className="container mx-auto flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <img src={comboLogo} alt="Logo" className="h-8" />
-          <h1 className="text-lg font-semibold text-foreground">Gestão de Metas</h1>
-        </div>
-      </header>
+      <SecondaryHeader title="Gestão de Metas" />
 
       <main className="container mx-auto p-4 md:p-6">
         <Card>

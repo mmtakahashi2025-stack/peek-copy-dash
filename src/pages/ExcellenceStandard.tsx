@@ -16,10 +16,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ArrowLeft, Plus, Trash2, Loader2, Save, Edit2, CalendarIcon, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
+import { Plus, Trash2, Loader2, Save, Edit2, CalendarIcon, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
-import comboLogo from '@/assets/combo-iguassu-logo.png';
+import { SecondaryHeader } from '@/components/layout/SecondaryHeader';
 
 // Validation schemas
 const criterionSchema = z.object({
@@ -390,15 +390,7 @@ export default function ExcellenceStandard() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b bg-card px-4 py-3">
-        <div className="container mx-auto flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <img src={comboLogo} alt="Logo" className="h-8" />
-          <h1 className="text-lg font-semibold text-foreground">Padrão de Excelência</h1>
-        </div>
-      </header>
+      <SecondaryHeader title="Padrão de Excelência" />
 
       <main className="container mx-auto p-4 md:p-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
