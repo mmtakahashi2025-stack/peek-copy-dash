@@ -1,19 +1,34 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { useSheetData } from '@/contexts/SheetDataContext';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, BarChart, Bar, Legend } from 'recharts';
+import { useSheetData, RawSaleRow } from '@/contexts/SheetDataContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useMemo } from 'react';
 import { AlertTriangle } from 'lucide-react';
 
-const chartConfig = {
+interface ChartConfig {
+  [key: string]: {
+    label: string;
+    color: string;
+  };
+}
+
+const chartConfig: ChartConfig = {
   vendas: {
     label: 'Vendas',
     color: 'hsl(var(--primary))',
   },
+  vendasCompare: {
+    label: 'Vendas (Comparação)',
+    color: 'hsl(var(--muted-foreground))',
+  },
   faturamento: {
     label: 'Faturamento',
     color: 'hsl(var(--success))',
+  },
+  faturamentoCompare: {
+    label: 'Faturamento (Comparação)',
+    color: 'hsl(var(--muted-foreground))',
   },
   leads: {
     label: 'Leads',
@@ -27,14 +42,92 @@ const formatCurrency = (value: number) => {
   if (value >= 1000000) {
     return `R$ ${(value / 1000000).toFixed(1)}M`;
   }
-  return `R$ ${(value / 1000).toFixed(0)}K`;
+  if (value >= 1000) {
+    return `R$ ${(value / 1000).toFixed(0)}K`;
+  }
+  return `R$ ${value.toFixed(0)}`;
 };
 
 interface SalesEvolutionChartProps {
   filialId?: string;
+  dateFrom?: Date;
+  dateTo?: Date;
+  compareEnabled?: boolean;
+  compareDateFrom?: Date;
+  compareDateTo?: Date;
 }
 
-export function SalesEvolutionChart({ filialId = 'todas' }: SalesEvolutionChartProps) {
+// Helper to parse date from row
+const parseRowDate = (dataVenda: number | string): Date | null => {
+  if (!dataVenda) return null;
+  
+  if (typeof dataVenda === 'number') {
+    // If it's a serial date from Excel
+    if (dataVenda > 40000) {
+      // Excel serial date - days since 1900-01-01
+      const excelEpoch = new Date(1899, 11, 30); // Excel epoch
+      return new Date(excelEpoch.getTime() + dataVenda * 24 * 60 * 60 * 1000);
+    }
+    // Assume it's a day of month - use current month
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), dataVenda);
+  } else if (typeof dataVenda === 'string') {
+    // Try to parse string date (DD/MM/YYYY format common in Brazil)
+    const parts = dataVenda.split('/');
+    if (parts.length === 3) {
+      return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+    }
+  }
+  
+  return null;
+};
+
+// Helper to filter data by date range
+const filterByDateRange = (data: RawSaleRow[], dateFrom?: Date, dateTo?: Date): RawSaleRow[] => {
+  if (!dateFrom && !dateTo) return data;
+  
+  return data.filter(r => {
+    const rowDate = parseRowDate(r['Data Venda']);
+    if (!rowDate || isNaN(rowDate.getTime())) return false;
+    
+    if (dateFrom && rowDate < dateFrom) return false;
+    if (dateTo && rowDate > dateTo) return false;
+    
+    return true;
+  });
+};
+
+// Helper to group data by month
+const groupByMonth = (data: RawSaleRow[]): { [key: number]: { vendas: Set<number>; faturamento: number } } => {
+  const monthlyData: { [key: number]: { vendas: Set<number>; faturamento: number } } = {};
+  
+  data.forEach(row => {
+    const rowDate = parseRowDate(row['Data Venda']);
+    if (!rowDate || isNaN(rowDate.getTime())) return;
+    
+    const month = rowDate.getMonth();
+    
+    if (!monthlyData[month]) {
+      monthlyData[month] = { vendas: new Set(), faturamento: 0 };
+    }
+    
+    if (row['Venda #']) {
+      monthlyData[month].vendas.add(row['Venda #']);
+    }
+    monthlyData[month].faturamento += row.Líquido || 0;
+  });
+  
+  return monthlyData;
+};
+
+export function SalesEvolutionChart({ 
+  filialId = 'todas', 
+  dateFrom,
+  dateTo,
+  compareEnabled = false,
+  compareDateFrom,
+  compareDateTo
+}: SalesEvolutionChartProps) {
   const { rawData } = useSheetData();
 
   // Normalize filial ID for comparison
@@ -45,45 +138,55 @@ export function SalesEvolutionChart({ filialId = 'todas' }: SalesEvolutionChartP
   // Process data by month for the chart
   const chartData = useMemo(() => {
     // Filter by filial if needed
-    const filteredData = filialId === 'todas' 
+    const filialFiltered = filialId === 'todas' 
       ? rawData 
       : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
 
-    if (filteredData.length === 0) {
-      // Return empty months structure
-      return meses.map(mes => ({
+    // Apply date filter
+    const filteredData = filterByDateRange(filialFiltered, dateFrom, dateTo);
+    
+    // Apply comparison date filter
+    const compareData = compareEnabled 
+      ? filterByDateRange(filialFiltered, compareDateFrom, compareDateTo)
+      : [];
+
+    // Group by month
+    const monthlyData = groupByMonth(filteredData);
+    const monthlyCompareData = compareEnabled ? groupByMonth(compareData) : {};
+
+    // Determine which months to show based on filtered data
+    const activeMonths = new Set<number>();
+    Object.keys(monthlyData).forEach(m => activeMonths.add(parseInt(m)));
+    if (compareEnabled) {
+      Object.keys(monthlyCompareData).forEach(m => activeMonths.add(parseInt(m)));
+    }
+
+    // If no specific filter, show all months with data
+    if (activeMonths.size === 0) {
+      return meses.map((mes, index) => ({
         mes,
         vendas: 0,
         faturamento: 0,
+        vendasCompare: 0,
+        faturamentoCompare: 0,
         leads: 0,
       }));
     }
 
-    // Group by month - using "Data Venda" which seems to be day numbers
-    // Since we don't have full dates, we'll aggregate all data as a single period
-    // and show it distributed across months proportionally for visualization
-    const vendaIds = new Set(filteredData.map(r => r['Venda #']));
-    const totalVendas = vendaIds.size;
-    const totalFaturamento = filteredData.reduce((sum, r) => sum + (r.Líquido || 0), 0);
+    // Create chart data for active months only
+    const sortedMonths = Array.from(activeMonths).sort((a, b) => a - b);
+    
+    return sortedMonths.map(monthIndex => ({
+      mes: meses[monthIndex],
+      vendas: monthlyData[monthIndex]?.vendas.size || 0,
+      faturamento: Math.round(monthlyData[monthIndex]?.faturamento || 0),
+      vendasCompare: monthlyCompareData[monthIndex]?.vendas.size || 0,
+      faturamentoCompare: Math.round(monthlyCompareData[monthIndex]?.faturamento || 0),
+      leads: 0, // Leads not available in spreadsheet
+    }));
+  }, [rawData, filialId, dateFrom, dateTo, compareEnabled, compareDateFrom, compareDateTo]);
 
-    // Create monthly data - distribute proportionally for visualization
-    // This is a placeholder since we don't have actual month data
-    return meses.map((mes, index) => {
-      // Create a gradual growth pattern for visualization
-      const factor = 0.7 + (index * 0.03); // Slight growth each month
-      const baseVendas = Math.round((totalVendas / 12) * factor);
-      const baseFaturamento = (totalFaturamento / 12) * factor;
-      
-      return {
-        mes,
-        vendas: baseVendas,
-        faturamento: Math.round(baseFaturamento),
-        leads: 0, // Leads not available in spreadsheet
-      };
-    });
-  }, [rawData, filialId]);
-
-  const hasData = rawData.length > 0;
+  const hasData = rawData.length > 0 && chartData.some(d => d.vendas > 0 || d.faturamento > 0);
 
   return (
     <Card>
@@ -101,30 +204,42 @@ export function SalesEvolutionChart({ filialId = 'todas' }: SalesEvolutionChartP
           <TabsContent value="vendas" className="h-[300px]">
             {!hasData ? (
               <div className="h-full flex items-center justify-center text-muted-foreground">
-                Carregue dados da planilha para visualizar o gráfico
+                {rawData.length === 0 
+                  ? 'Carregue dados da planilha para visualizar o gráfico'
+                  : 'Nenhum dado encontrado para o período selecionado'}
               </div>
             ) : (
               <ChartContainer config={chartConfig} className="h-full w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis 
-                      dataKey="mes" 
-                      tick={{ fontSize: 12 }}
-                      className="fill-muted-foreground"
-                    />
-                    <YAxis 
-                      tick={{ fontSize: 12 }}
-                      className="fill-muted-foreground"
-                    />
-                    <ChartTooltip content={<ChartTooltipContent />} />
+                <BarChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis 
+                    dataKey="mes" 
+                    tick={{ fontSize: 12 }}
+                    className="fill-muted-foreground"
+                  />
+                  <YAxis 
+                    tick={{ fontSize: 12 }}
+                    className="fill-muted-foreground"
+                  />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  {compareEnabled && (
+                    <Legend />
+                  )}
+                  <Bar 
+                    dataKey="vendas" 
+                    name="Vendas"
+                    fill="hsl(var(--primary))" 
+                    radius={[4, 4, 0, 0]}
+                  />
+                  {compareEnabled && (
                     <Bar 
-                      dataKey="vendas" 
-                      fill="hsl(var(--primary))" 
+                      dataKey="vendasCompare" 
+                      name="Comparação"
+                      fill="hsl(var(--muted-foreground))" 
                       radius={[4, 4, 0, 0]}
                     />
-                  </BarChart>
-                </ResponsiveContainer>
+                  )}
+                </BarChart>
               </ChartContainer>
             )}
           </TabsContent>
@@ -132,37 +247,52 @@ export function SalesEvolutionChart({ filialId = 'todas' }: SalesEvolutionChartP
           <TabsContent value="faturamento" className="h-[300px]">
             {!hasData ? (
               <div className="h-full flex items-center justify-center text-muted-foreground">
-                Carregue dados da planilha para visualizar o gráfico
+                {rawData.length === 0 
+                  ? 'Carregue dados da planilha para visualizar o gráfico'
+                  : 'Nenhum dado encontrado para o período selecionado'}
               </div>
             ) : (
               <ChartContainer config={chartConfig} className="h-full w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis 
-                      dataKey="mes" 
-                      tick={{ fontSize: 12 }}
-                      className="fill-muted-foreground"
-                    />
-                    <YAxis 
-                      tick={{ fontSize: 12 }}
-                      tickFormatter={formatCurrency}
-                      className="fill-muted-foreground"
-                    />
-                    <ChartTooltip 
-                      content={<ChartTooltipContent />} 
-                      formatter={(value: number) => formatCurrency(value)}
-                    />
+                <LineChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis 
+                    dataKey="mes" 
+                    tick={{ fontSize: 12 }}
+                    className="fill-muted-foreground"
+                  />
+                  <YAxis 
+                    tick={{ fontSize: 12 }}
+                    tickFormatter={formatCurrency}
+                    className="fill-muted-foreground"
+                  />
+                  <ChartTooltip 
+                    content={<ChartTooltipContent />} 
+                    formatter={(value: number) => formatCurrency(value)}
+                  />
+                  {compareEnabled && (
+                    <Legend />
+                  )}
+                  <Line 
+                    type="monotone" 
+                    dataKey="faturamento"
+                    name="Faturamento" 
+                    stroke="hsl(var(--success))" 
+                    strokeWidth={2}
+                    dot={{ fill: 'hsl(var(--success))', strokeWidth: 2, r: 4 }}
+                    activeDot={{ r: 6 }}
+                  />
+                  {compareEnabled && (
                     <Line 
                       type="monotone" 
-                      dataKey="faturamento" 
-                      stroke="hsl(var(--success))" 
+                      dataKey="faturamentoCompare"
+                      name="Comparação" 
+                      stroke="hsl(var(--muted-foreground))" 
                       strokeWidth={2}
-                      dot={{ fill: 'hsl(var(--success))', strokeWidth: 2, r: 4 }}
-                      activeDot={{ r: 6 }}
+                      strokeDasharray="5 5"
+                      dot={{ fill: 'hsl(var(--muted-foreground))', strokeWidth: 2, r: 3 }}
                     />
-                  </LineChart>
-                </ResponsiveContainer>
+                  )}
+                </LineChart>
               </ChartContainer>
             )}
           </TabsContent>

@@ -129,7 +129,14 @@ export default function Dashboard() {
         
         {/* Chart and Rankings */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <SalesEvolutionChart filialId={filters.filial} />
+          <SalesEvolutionChart 
+            filialId={filters.filial}
+            dateFrom={filters.dateFrom}
+            dateTo={filters.dateTo}
+            compareEnabled={filters.compareEnabled}
+            compareDateFrom={filters.compareDateFrom}
+            compareDateTo={filters.compareDateTo}
+          />
           <RankingCard colaboradores={colaboradores} />
           <ProductRankingCard produtos={produtos} />
         </div>
