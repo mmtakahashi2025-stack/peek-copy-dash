@@ -12,7 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Save, Loader2, Copy, CalendarRange } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
-import { SecondaryHeader } from '@/components/layout/SecondaryHeader';
+import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 
 // Validation schema for KPI target values
 const kpiTargetSchema = z.number()
@@ -206,7 +206,7 @@ export default function Targets() {
 
   return (
     <div className="min-h-screen bg-background">
-      <SecondaryHeader title="Gestão de Metas" />
+      <DashboardHeader />
 
       <main className="container mx-auto p-4 md:p-6">
         <Card>
