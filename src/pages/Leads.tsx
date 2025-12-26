@@ -50,6 +50,7 @@ export default function Leads() {
   const [savingCell, setSavingCell] = useState<string | null>(null);
   const [totalRecebido, setTotalRecebido] = useState<Record<string, number>>({});
   const [savingRecebido, setSavingRecebido] = useState<string | null>(null);
+  const [targets, setTargets] = useState<{ recebido: number; distribuido: number }>({ recebido: 0, distribuido: 0 });
   
   // Month/Year filter for grid view
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
@@ -66,6 +67,32 @@ export default function Leads() {
   useEffect(() => {
     loadRecords();
   }, []);
+
+  // Load targets when month/year changes
+  useEffect(() => {
+    const loadTargets = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('kpi_targets')
+          .select('kpi_type, target_value')
+          .eq('year', selectedYear)
+          .eq('month', selectedMonth + 1) // month is 0-indexed in state
+          .in('kpi_type', ['leads_diario_recebido', 'leads_diario_distribuido']);
+
+        if (error) throw error;
+
+        const targetsMap = { recebido: 0, distribuido: 0 };
+        data?.forEach((t) => {
+          if (t.kpi_type === 'leads_diario_recebido') targetsMap.recebido = t.target_value;
+          if (t.kpi_type === 'leads_diario_distribuido') targetsMap.distribuido = t.target_value;
+        });
+        setTargets(targetsMap);
+      } catch (error) {
+        console.error('Error loading targets:', error);
+      }
+    };
+    loadTargets();
+  }, [selectedMonth, selectedYear]);
 
   const loadRecords = async () => {
     setLoading(true);
@@ -329,15 +356,23 @@ export default function Leads() {
                 <p className="text-2xl font-bold text-destructive">{kpis.leadsInvalidosPercent.toFixed(2)}%</p>
                 <p className="text-xs text-muted-foreground">Máx</p>
               </Card>
-              <Card className="p-4">
+              <Card className={cn("p-4", targets.recebido > 0 && kpis.mediaDiariaRecebido < targets.recebido && "border-destructive/50 bg-destructive/5")}>
                 <p className="text-xs text-muted-foreground mb-1">Média Diária/Recebido</p>
-                <p className="text-2xl font-bold">{kpis.mediaDiariaRecebido.toFixed(0)}</p>
-                <p className="text-xs text-muted-foreground">Mín</p>
+                <p className={cn("text-2xl font-bold", targets.recebido > 0 && kpis.mediaDiariaRecebido < targets.recebido && "text-destructive")}>
+                  {kpis.mediaDiariaRecebido.toFixed(0)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {targets.recebido > 0 ? `Meta: ${targets.recebido}` : 'Mín'}
+                </p>
               </Card>
-              <Card className="p-4 border-destructive/50 bg-destructive/5">
+              <Card className={cn("p-4", targets.distribuido > 0 && kpis.mediaDiariaEncaminhado < targets.distribuido && "border-destructive/50 bg-destructive/5")}>
                 <p className="text-xs text-muted-foreground mb-1">Média Diária/Encaminhado</p>
-                <p className="text-2xl font-bold text-destructive">{kpis.mediaDiariaEncaminhado.toFixed(1)}</p>
-                <p className="text-xs text-muted-foreground">Mín</p>
+                <p className={cn("text-2xl font-bold", targets.distribuido > 0 && kpis.mediaDiariaEncaminhado < targets.distribuido && "text-destructive")}>
+                  {kpis.mediaDiariaEncaminhado.toFixed(1)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {targets.distribuido > 0 ? `Meta: ${targets.distribuido}` : 'Mín'}
+                </p>
               </Card>
             </div>
 
