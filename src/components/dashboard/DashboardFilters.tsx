@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -9,11 +9,44 @@ import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { filiaisData, colaboradoresData } from '@/data/mockData';
 
-export function DashboardFilters() {
+interface DashboardFiltersProps {
+  onFiltersChange?: (filters: {
+    dateFrom: Date | undefined;
+    dateTo: Date | undefined;
+    filial: string;
+    colaborador: string;
+  }) => void;
+}
+
+export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
   const [dateFrom, setDateFrom] = useState<Date | undefined>(new Date(2024, 0, 1));
   const [dateTo, setDateTo] = useState<Date | undefined>(new Date());
   const [filial, setFilial] = useState('todas');
   const [colaborador, setColaborador] = useState('todos');
+
+  // Filtrar colaboradores baseado na filial selecionada
+  const filteredColaboradores = filial === 'todas' 
+    ? colaboradoresData 
+    : colaboradoresData.filter(c => c.filial === filial);
+
+  useEffect(() => {
+    onFiltersChange?.({
+      dateFrom,
+      dateTo,
+      filial,
+      colaborador,
+    });
+  }, [dateFrom, dateTo, filial, colaborador, onFiltersChange]);
+
+  // Reset colaborador quando mudar filial
+  useEffect(() => {
+    if (filial !== 'todas') {
+      const colaboradorExiste = filteredColaboradores.some(c => c.id.toString() === colaborador);
+      if (!colaboradorExiste && colaborador !== 'todos') {
+        setColaborador('todos');
+      }
+    }
+  }, [filial, colaborador, filteredColaboradores]);
 
   return (
     <div className="flex flex-wrap items-center gap-3 p-4 bg-card rounded-xl shadow-sm border">
@@ -92,7 +125,7 @@ export function DashboardFilters() {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="todos">Todos os Colaboradores</SelectItem>
-          {colaboradoresData.map((c) => (
+          {filteredColaboradores.map((c) => (
             <SelectItem key={c.id} value={c.id.toString()}>
               {c.nome}
             </SelectItem>
