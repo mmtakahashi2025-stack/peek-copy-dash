@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isWithinInterval, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Loader2, CalendarIcon, Users, ChevronUp, ChevronDown } from 'lucide-react';
+import { Loader2, CalendarIcon, Users, ChevronUp, ChevronDown, TrendingDown, Minus, ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { SecondaryHeader } from '@/components/layout/SecondaryHeader';
 
@@ -21,6 +21,15 @@ interface LeadRecord {
   collaborator_name: string;
   record_date: string;
   leads_count: number;
+}
+
+interface LeadKPIs {
+  totalRecebido: number;
+  totalDistribuido: number;
+  leadsInvalidos: number;
+  leadsInvalidosPercent: number;
+  mediaDiariaRecebido: number;
+  mediaDiariaEncaminhado: number;
 }
 
 // Month names in Portuguese
@@ -39,6 +48,8 @@ export default function Leads() {
   const [records, setRecords] = useState<LeadRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [savingCell, setSavingCell] = useState<string | null>(null);
+  const [totalRecebido, setTotalRecebido] = useState<Record<string, number>>({});
+  const [savingRecebido, setSavingRecebido] = useState<string | null>(null);
   
   // Month/Year filter for grid view
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
@@ -189,7 +200,7 @@ export default function Leads() {
       return row;
     });
 
-    // Calculate daily totals
+    // Calculate daily totals (distribuído)
     const dailyTotals: Record<string, number> = {};
     daysInMonth.forEach((day) => {
       const dateStr = format(day, 'yyyy-MM-dd');
@@ -199,9 +210,59 @@ export default function Leads() {
     });
 
     const grandTotal = Object.values(dailyTotals).reduce((sum, v) => sum + v, 0);
+    
+    // Calculate recebido totals
+    const recebidoGrandTotal = Object.entries(totalRecebido)
+      .filter(([dateStr]) => {
+        const date = parseISO(dateStr);
+        return isWithinInterval(date, { start: monthStart, end: monthEnd });
+      })
+      .reduce((sum, [, v]) => sum + v, 0);
 
-    return { grid, daysInMonth, dailyTotals, grandTotal };
-  }, [records, gridMonth, colaboradores]);
+    return { grid, daysInMonth, dailyTotals, grandTotal, recebidoGrandTotal };
+  }, [records, gridMonth, colaboradores, totalRecebido]);
+
+  // KPIs calculation
+  const kpis = useMemo((): LeadKPIs => {
+    const monthStart = startOfMonth(gridMonth);
+    const monthEnd = endOfMonth(gridMonth);
+    const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
+    const daysCount = daysInMonth.length;
+    const today = new Date();
+    const daysElapsed = Math.min(
+      daysInMonth.filter(d => d <= today).length,
+      daysCount
+    ) || 1;
+
+    const totalDistribuido = gridData.grandTotal;
+    const totalRecebidoValue = gridData.recebidoGrandTotal;
+    const leadsInvalidos = Math.max(0, totalRecebidoValue - totalDistribuido);
+    const leadsInvalidosPercent = totalRecebidoValue > 0 
+      ? (leadsInvalidos / totalRecebidoValue) * 100 
+      : 0;
+    const mediaDiariaRecebido = totalRecebidoValue / daysElapsed;
+    const mediaDiariaEncaminhado = totalDistribuido / daysElapsed;
+
+    return {
+      totalRecebido: totalRecebidoValue,
+      totalDistribuido,
+      leadsInvalidos,
+      leadsInvalidosPercent,
+      mediaDiariaRecebido,
+      mediaDiariaEncaminhado,
+    };
+  }, [gridData, gridMonth]);
+
+  // Handle recebido increment/decrement
+  const handleRecebidoIncrement = (dateStr: string, currentValue: number) => {
+    setTotalRecebido(prev => ({ ...prev, [dateStr]: currentValue + 1 }));
+  };
+
+  const handleRecebidoDecrement = (dateStr: string, currentValue: number) => {
+    if (currentValue > 0) {
+      setTotalRecebido(prev => ({ ...prev, [dateStr]: currentValue - 1 }));
+    }
+  };
 
   // Ranking data - filtered by selected month
   const rankingData = useMemo(() => {
@@ -252,7 +313,34 @@ export default function Leads() {
             <TabsTrigger value="ranking">Ranking</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="grid">
+          <TabsContent value="grid" className="space-y-4">
+            {/* KPIs Section */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+              <Card className="p-4">
+                <p className="text-xs text-muted-foreground mb-1">Total Recebido</p>
+                <p className="text-2xl font-bold">{kpis.totalRecebido.toLocaleString('pt-BR')}</p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs text-muted-foreground mb-1">Total Distribuído</p>
+                <p className="text-2xl font-bold">{kpis.totalDistribuido.toLocaleString('pt-BR')}</p>
+              </Card>
+              <Card className="p-4 border-destructive/50">
+                <p className="text-xs text-muted-foreground mb-1">Leads Inválidos</p>
+                <p className="text-2xl font-bold text-destructive">{kpis.leadsInvalidosPercent.toFixed(2)}%</p>
+                <p className="text-xs text-muted-foreground">Máx</p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs text-muted-foreground mb-1">Média Diária/Recebido</p>
+                <p className="text-2xl font-bold">{kpis.mediaDiariaRecebido.toFixed(0)}</p>
+                <p className="text-xs text-muted-foreground">Mín</p>
+              </Card>
+              <Card className="p-4 border-destructive/50 bg-destructive/5">
+                <p className="text-xs text-muted-foreground mb-1">Média Diária/Encaminhado</p>
+                <p className="text-2xl font-bold text-destructive">{kpis.mediaDiariaEncaminhado.toFixed(1)}</p>
+                <p className="text-xs text-muted-foreground">Mín</p>
+              </Card>
+            </div>
+
             <Card>
               <CardHeader className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <CardTitle className="text-lg">Leads por Colaborador</CardTitle>
@@ -384,7 +472,39 @@ export default function Leads() {
                             </TableCell>
                           </TableRow>
                         ))}
-                        {/* Total row */}
+                        {/* Total Recebido row */}
+                        <TableRow className="bg-primary/10 font-bold">
+                          <TableCell className="sticky left-0 bg-primary/10 z-10">Total Recebido</TableCell>
+                          {gridData.daysInMonth.map((day) => {
+                            const dateStr = format(day, 'yyyy-MM-dd');
+                            const value = totalRecebido[dateStr] || 0;
+
+                            return (
+                              <TableCell key={dateStr} className="text-center p-0 h-12">
+                                <div className="flex flex-col items-center justify-center h-full group relative">
+                                  <button
+                                    className="w-full h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted/50"
+                                    onClick={() => handleRecebidoIncrement(dateStr, value)}
+                                  >
+                                    <ChevronUp className="h-3 w-3" />
+                                  </button>
+                                  <span className="text-sm font-medium">
+                                    {value > 0 ? value : '-'}
+                                  </span>
+                                  <button
+                                    className="w-full h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted/50"
+                                    onClick={() => handleRecebidoDecrement(dateStr, value)}
+                                    disabled={value === 0}
+                                  >
+                                    <ChevronDown className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              </TableCell>
+                            );
+                          })}
+                          <TableCell className="text-center">{gridData.recebidoGrandTotal}</TableCell>
+                        </TableRow>
+                        {/* Total Distribuído row */}
                         <TableRow className="bg-muted/50 font-bold">
                           <TableCell className="sticky left-0 bg-muted/50 z-10">Total Distribuído</TableCell>
                           {gridData.daysInMonth.map((day) => {
