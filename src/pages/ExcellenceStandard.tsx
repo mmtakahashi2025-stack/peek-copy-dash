@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSheetData } from '@/contexts/SheetDataContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -29,6 +31,7 @@ interface Criterion {
 interface Evaluation {
   id: string;
   collaborator_name: string;
+  conversation_number: string | null;
   evaluation_date: string;
   created_at: string;
   scores: Record<string, number>;
@@ -37,6 +40,7 @@ interface Evaluation {
 
 export default function ExcellenceStandard() {
   const { user, loading: authLoading } = useAuth();
+  const { colaboradores } = useSheetData();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('evaluations');
   
@@ -53,6 +57,7 @@ export default function ExcellenceStandard() {
   const [showEvaluationDialog, setShowEvaluationDialog] = useState(false);
   const [evaluationForm, setEvaluationForm] = useState({
     collaborator_name: '',
+    conversation_number: '',
     evaluation_date: new Date(),
     scores: {} as Record<string, number>,
   });
@@ -209,8 +214,8 @@ export default function ExcellenceStandard() {
 
   // Evaluation functions
   const handleSaveEvaluation = async () => {
-    if (!evaluationForm.collaborator_name.trim()) {
-      toast.error('Informe o nome do colaborador');
+    if (!evaluationForm.collaborator_name) {
+      toast.error('Selecione o colaborador');
       return;
     }
 
@@ -223,6 +228,7 @@ export default function ExcellenceStandard() {
           .from('excellence_evaluations')
           .update({
             collaborator_name: evaluationForm.collaborator_name,
+            conversation_number: evaluationForm.conversation_number || null,
             evaluation_date: format(evaluationForm.evaluation_date, 'yyyy-MM-dd'),
           })
           .eq('id', editingEvaluation.id);
@@ -240,6 +246,7 @@ export default function ExcellenceStandard() {
           .from('excellence_evaluations')
           .insert({
             collaborator_name: evaluationForm.collaborator_name,
+            conversation_number: evaluationForm.conversation_number || null,
             evaluation_date: format(evaluationForm.evaluation_date, 'yyyy-MM-dd'),
           })
           .select()
@@ -271,6 +278,7 @@ export default function ExcellenceStandard() {
       setEditingEvaluation(null);
       setEvaluationForm({
         collaborator_name: '',
+        conversation_number: '',
         evaluation_date: new Date(),
         scores: {},
       });
@@ -305,6 +313,7 @@ export default function ExcellenceStandard() {
     setEditingEvaluation(evaluation);
     setEvaluationForm({
       collaborator_name: evaluation.collaborator_name,
+      conversation_number: evaluation.conversation_number || '',
       evaluation_date: new Date(evaluation.evaluation_date),
       scores: { ...evaluation.scores },
     });
@@ -315,6 +324,7 @@ export default function ExcellenceStandard() {
     setEditingEvaluation(null);
     setEvaluationForm({
       collaborator_name: '',
+      conversation_number: '',
       evaluation_date: new Date(),
       scores: {},
     });
@@ -489,6 +499,7 @@ export default function ExcellenceStandard() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Colaborador</TableHead>
+                        <TableHead>Nº Conversa</TableHead>
                         <TableHead>Data</TableHead>
                         <TableHead>Resultado</TableHead>
                         <TableHead className="w-24">Ações</TableHead>
@@ -499,6 +510,9 @@ export default function ExcellenceStandard() {
                         <TableRow key={evaluation.id}>
                           <TableCell className="font-medium">
                             {evaluation.collaborator_name}
+                          </TableCell>
+                          <TableCell>
+                            {evaluation.conversation_number || '-'}
                           </TableCell>
                           <TableCell>
                             {format(new Date(evaluation.evaluation_date), 'dd/MM/yyyy')}
@@ -552,16 +566,45 @@ export default function ExcellenceStandard() {
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Colaborador</Label>
-                  <Input
-                    placeholder="Nome do colaborador"
+                  <Select
                     value={evaluationForm.collaborator_name}
+                    onValueChange={(value) =>
+                      setEvaluationForm((prev) => ({
+                        ...prev,
+                        collaborator_name: value,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione o colaborador" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {colaboradores.length === 0 ? (
+                        <SelectItem value="none" disabled>
+                          Carregue a planilha primeiro
+                        </SelectItem>
+                      ) : (
+                        colaboradores.map((colaborador) => (
+                          <SelectItem key={colaborador} value={colaborador}>
+                            {colaborador}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Nº da Conversa</Label>
+                  <Input
+                    placeholder="Ex: 12345"
+                    value={evaluationForm.conversation_number}
                     onChange={(e) =>
                       setEvaluationForm((prev) => ({
                         ...prev,
-                        collaborator_name: e.target.value,
+                        conversation_number: e.target.value,
                       }))
                     }
                   />
