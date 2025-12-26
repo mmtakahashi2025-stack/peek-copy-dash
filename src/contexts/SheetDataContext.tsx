@@ -229,11 +229,20 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     setError(null);
 
     try {
+      // Validate URL before making the request
+      if (!isValidSheetUrl(url)) {
+        throw new Error('URL inválida. Use uma URL do Google Sheets.');
+      }
+
       const { data: response, error: funcError } = await supabase.functions.invoke('fetch-sheets', {
         body: { sheetUrl: url }
       });
 
       if (funcError) {
+        // Check for authentication errors
+        if (funcError.message?.includes('401') || funcError.message?.includes('Unauthorized') || funcError.message?.includes('non-2xx')) {
+          throw new Error('Sessão expirada. Faça login novamente para carregar a planilha.');
+        }
         throw new Error(funcError.message || 'Erro ao buscar dados');
       }
 
