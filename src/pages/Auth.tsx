@@ -60,48 +60,53 @@ export default function Auth() {
   return (
     <div className="min-h-screen flex">
       {/* Left Panel - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary via-primary/90 to-accent p-12 flex-col justify-between">
-        <div className="flex items-center gap-4">
-          <img src={comboLogo} alt="Combo Iguassu" className="h-16 w-16 rounded-xl object-contain bg-white/10 p-2" />
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-orange-500 via-orange-600 to-amber-700 p-12 flex-col justify-between relative overflow-hidden">
+        {/* Background decorative elements */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.15),transparent_50%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_80%,rgba(0,0,0,0.1),transparent_50%)]" />
+        <div className="absolute -top-24 -right-24 w-96 h-96 bg-white/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-amber-400/20 rounded-full blur-3xl" />
+        <div className="flex items-center gap-4 relative z-10">
+          <img src={comboLogo} alt="Combo Iguassu" className="h-16 w-16 rounded-xl object-contain bg-white/20 p-2 backdrop-blur-sm shadow-lg" />
           <div>
-            <h1 className="text-3xl font-bold text-primary-foreground">Sales Ops</h1>
-            <p className="text-primary-foreground/80 mt-2">Combo Iguassu - Dashboard de Vendas</p>
+            <h1 className="text-3xl font-bold text-white drop-shadow-md">Sales Ops</h1>
+            <p className="text-white/90 mt-2">Combo Iguassu - Dashboard de Vendas</p>
           </div>
         </div>
         
-        <div className="space-y-8">
+        <div className="space-y-8 relative z-10">
           <div className="flex items-start gap-4">
-            <div className="p-3 rounded-lg bg-primary-foreground/10">
-              <TrendingUp className="h-6 w-6 text-primary-foreground" />
+            <div className="p-3 rounded-lg bg-white/15 backdrop-blur-sm">
+              <TrendingUp className="h-6 w-6 text-white" />
             </div>
             <div>
-              <h3 className="font-semibold text-primary-foreground">Métricas em Tempo Real</h3>
-              <p className="text-primary-foreground/70 text-sm">Acompanhe vendas, conversões e faturamento</p>
+              <h3 className="font-semibold text-white">Métricas em Tempo Real</h3>
+              <p className="text-white/75 text-sm">Acompanhe vendas, conversões e faturamento</p>
             </div>
           </div>
           
           <div className="flex items-start gap-4">
-            <div className="p-3 rounded-lg bg-primary-foreground/10">
-              <BarChart3 className="h-6 w-6 text-primary-foreground" />
+            <div className="p-3 rounded-lg bg-white/15 backdrop-blur-sm">
+              <BarChart3 className="h-6 w-6 text-white" />
             </div>
             <div>
-              <h3 className="font-semibold text-primary-foreground">Análise de Desempenho</h3>
-              <p className="text-primary-foreground/70 text-sm">Compare resultados e identifique tendências</p>
+              <h3 className="font-semibold text-white">Análise de Desempenho</h3>
+              <p className="text-white/75 text-sm">Compare resultados e identifique tendências</p>
             </div>
           </div>
           
           <div className="flex items-start gap-4">
-            <div className="p-3 rounded-lg bg-primary-foreground/10">
-              <Users className="h-6 w-6 text-primary-foreground" />
+            <div className="p-3 rounded-lg bg-white/15 backdrop-blur-sm">
+              <Users className="h-6 w-6 text-white" />
             </div>
             <div>
-              <h3 className="font-semibold text-primary-foreground">Ranking de Colaboradores</h3>
-              <p className="text-primary-foreground/70 text-sm">Visualize os melhores vendedores</p>
+              <h3 className="font-semibold text-white">Ranking de Colaboradores</h3>
+              <p className="text-white/75 text-sm">Visualize os melhores vendedores</p>
             </div>
           </div>
         </div>
         
-        <p className="text-primary-foreground/60 text-sm">© 2024 Sales Ops - Combo Iguassu</p>
+        <p className="text-white/60 text-sm relative z-10">© 2024 Sales Ops - Combo Iguassu</p>
       </div>
       
       {/* Right Panel - Auth Form */}
