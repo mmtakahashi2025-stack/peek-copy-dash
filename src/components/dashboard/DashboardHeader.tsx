@@ -2,8 +2,12 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { LogOut } from 'lucide-react';
 import comboLogo from '@/assets/combo-iguassu-logo.png';
+import { SheetConfigDialog } from './SheetConfigDialog';
 
-export function DashboardHeader() {
+interface DashboardHeaderProps {
+  onSheetDataLoaded?: (data: Record<string, string | number>[]) => void;
+}
+export function DashboardHeader({ onSheetDataLoaded }: DashboardHeaderProps) {
   const { user, signOut } = useAuth();
 
   return (
@@ -17,8 +21,9 @@ export function DashboardHeader() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-muted-foreground hidden sm:block">
+        <div className="flex items-center gap-2 sm:gap-4">
+          <SheetConfigDialog onDataLoaded={onSheetDataLoaded} />
+          <span className="text-sm text-muted-foreground hidden md:block">
             {user?.email}
           </span>
           <Button variant="ghost" size="sm" onClick={signOut} className="gap-2">
