@@ -22,10 +22,8 @@ const kpiTargetSchema = z.number()
 
 const KPI_TYPES = [
   { id: 'padrao_exc', label: 'Padrão Exc. %' },
-  { id: 'leads', label: 'Leads' },
   { id: 'leads_diario_recebido', label: 'Leads - Média Diária Recebido' },
   { id: 'leads_diario_distribuido', label: 'Leads - Média Diária Distribuído' },
-  { id: 'vendas', label: 'Vendas' },
   { id: 'conversao', label: 'Conversão %' },
   { id: 'faturamento', label: 'Faturamento' },
   { id: 'ticket_medio', label: 'Ticket Médio' },
