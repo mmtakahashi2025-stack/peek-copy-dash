@@ -57,6 +57,12 @@ export interface FilialData {
   nome: string;
 }
 
+export interface ProdutoData {
+  id: number;
+  nome: string;
+  quantidade: number;
+}
+
 interface SheetDataContextType {
   rawData: RawSaleRow[];
   isLoading: boolean;
@@ -67,6 +73,7 @@ interface SheetDataContextType {
   getKpis: (filialId: string) => KpiData[];
   getColaboradores: (filialId: string, colaboradorId?: string) => ColaboradorData[];
   getEvolucao: () => EvolucaoData[];
+  getProdutos: (filialId: string) => ProdutoData[];
   loadSheet: (url: string) => Promise<void>;
   refreshData: () => Promise<void>;
 }
@@ -327,6 +334,32 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     return [];
   }, [rawData]);
 
+  // Calculate product ranking
+  const getProdutos = useCallback((filialId: string): ProdutoData[] => {
+    const filteredData = filialId === 'todas' 
+      ? rawData 
+      : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
+
+    // Group by Item and sum Quantidade
+    const byProduto: Record<string, number> = {};
+    
+    filteredData.forEach(row => {
+      const item = row.Item;
+      if (!item) return;
+      
+      const quantidade = row.Quantidade || 0;
+      byProduto[item] = (byProduto[item] || 0) + quantidade;
+    });
+
+    return Object.entries(byProduto)
+      .map(([nome, quantidade], index) => ({
+        id: index + 1,
+        nome,
+        quantidade,
+      }))
+      .sort((a, b) => b.quantidade - a.quantidade);
+  }, [rawData]);
+
   return (
     <SheetDataContext.Provider value={{
       rawData,
@@ -338,6 +371,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       getKpis,
       getColaboradores,
       getEvolucao,
+      getProdutos,
       loadSheet,
       refreshData,
     }}>
