@@ -4,7 +4,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { CalendarIcon, ArrowLeftRight, Search } from 'lucide-react';
+import { CalendarIcon, ArrowLeftRight, Search, Loader2 } from 'lucide-react';
 import { format, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -35,13 +35,24 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [filial, setFilial] = useState('todas');
   const [colaborador, setColaborador] = useState('todos');
+  const [isLoading, setIsLoading] = useState(false);
 
   // Filtrar colaboradores baseado na filial selecionada
   const filteredColaboradores = filial === 'todas' 
     ? colaboradoresData 
     : colaboradoresData.filter(c => c.filial === filial);
 
+  // Aplicar filtros iniciais ao montar o componente
   useEffect(() => {
+    handleApplyFilters();
+  }, []);
+
+  const handleApplyFilters = async () => {
+    setIsLoading(true);
+    
+    // Simular tempo de busca
+    await new Promise(resolve => setTimeout(resolve, 800));
+    
     onFiltersChange?.({
       dateFrom: dateRange?.from,
       dateTo: dateRange?.to,
@@ -51,7 +62,9 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
       compareDateFrom: compareDateRange?.from,
       compareDateTo: compareDateRange?.to,
     });
-  }, [dateRange, filial, colaborador, compareEnabled, compareDateRange, onFiltersChange]);
+    
+    setIsLoading(false);
+  };
 
   // Reset colaborador quando mudar filial
   useEffect(() => {
@@ -172,9 +185,9 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
       <div className="h-6 w-px bg-border mx-1 hidden sm:block" />
 
       {/* Filtrar Button */}
-      <Button className="gap-2">
-        <Search className="h-4 w-4" />
-        Filtrar
+      <Button className="gap-2" onClick={handleApplyFilters} disabled={isLoading}>
+        {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+        {isLoading ? 'Buscando...' : 'Filtrar'}
       </Button>
     </div>
   );
