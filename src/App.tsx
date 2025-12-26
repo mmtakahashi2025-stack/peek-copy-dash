@@ -7,6 +7,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { SheetDataProvider } from "./contexts/SheetDataContext";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
+import Targets from "./pages/Targets";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -21,8 +22,9 @@ function App() {
             <Sonner />
             <BrowserRouter>
               <Routes>
-                <Route path="/" element={<Index />} />
+              <Route path="/" element={<Index />} />
                 <Route path="/auth" element={<Auth />} />
+                <Route path="/metas" element={<Targets />} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>

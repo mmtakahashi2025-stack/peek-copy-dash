@@ -14,7 +14,36 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      kpi_targets: {
+        Row: {
+          created_at: string
+          id: string
+          kpi_type: string
+          month: number
+          target_value: number
+          updated_at: string
+          year: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kpi_type: string
+          month: number
+          target_value: number
+          updated_at?: string
+          year: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kpi_type?: string
+          month?: number
+          target_value?: number
+          updated_at?: string
+          year?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
