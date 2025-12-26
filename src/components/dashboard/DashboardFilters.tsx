@@ -5,7 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { CalendarIcon, ArrowLeftRight, Search, Loader2 } from 'lucide-react';
-import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays, subMonths, startOfYear, endOfYear } from 'date-fns';
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays, subMonths, startOfYear, endOfYear, subYears } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { useSheetData } from '@/contexts/SheetDataContext';
@@ -17,65 +17,14 @@ type DatePreset = {
 };
 
 const datePresets: DatePreset[] = [
-  {
-    label: 'Hoje',
-    getValue: () => {
-      const today = new Date();
-      return { from: today, to: today };
-    },
-  },
-  {
-    label: 'Ontem',
-    getValue: () => {
-      const yesterday = subDays(new Date(), 1);
-      return { from: yesterday, to: yesterday };
-    },
-  },
-  {
-    label: 'Últimos 7 dias',
-    getValue: () => ({
-      from: subDays(new Date(), 6),
-      to: new Date(),
-    }),
-  },
-  {
-    label: 'Últimos 30 dias',
-    getValue: () => ({
-      from: subDays(new Date(), 29),
-      to: new Date(),
-    }),
-  },
-  {
-    label: 'Esta semana',
-    getValue: () => ({
-      from: startOfWeek(new Date(), { locale: ptBR }),
-      to: endOfWeek(new Date(), { locale: ptBR }),
-    }),
-  },
-  {
-    label: 'Este mês',
-    getValue: () => ({
-      from: startOfMonth(new Date()),
-      to: endOfMonth(new Date()),
-    }),
-  },
-  {
-    label: 'Mês passado',
-    getValue: () => {
-      const lastMonth = subMonths(new Date(), 1);
-      return {
-        from: startOfMonth(lastMonth),
-        to: endOfMonth(lastMonth),
-      };
-    },
-  },
-  {
-    label: 'Este ano',
-    getValue: () => ({
-      from: startOfYear(new Date()),
-      to: endOfYear(new Date()),
-    }),
-  },
+  { label: 'Hoje', getValue: () => ({ from: new Date(), to: new Date() }) },
+  { label: 'Ontem', getValue: () => ({ from: subDays(new Date(), 1), to: subDays(new Date(), 1) }) },
+  { label: '7 dias', getValue: () => ({ from: subDays(new Date(), 6), to: new Date() }) },
+  { label: '30 dias', getValue: () => ({ from: subDays(new Date(), 29), to: new Date() }) },
+  { label: 'Semana', getValue: () => ({ from: startOfWeek(new Date(), { locale: ptBR }), to: endOfWeek(new Date(), { locale: ptBR }) }) },
+  { label: 'Mês', getValue: () => ({ from: startOfMonth(new Date()), to: endOfMonth(new Date()) }) },
+  { label: 'Mês anterior', getValue: () => ({ from: startOfMonth(subMonths(new Date(), 1)), to: endOfMonth(subMonths(new Date(), 1)) }) },
+  { label: 'Ano', getValue: () => ({ from: startOfYear(new Date()), to: endOfYear(new Date()) }) },
 ];
 
 interface DashboardFiltersProps {
@@ -167,13 +116,13 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
           <div className="flex">
-            <div className="border-r p-2 space-y-1">
+            <div className="border-r p-1 flex flex-col gap-0.5">
               {datePresets.map((preset) => (
                 <Button
                   key={preset.label}
                   variant="ghost"
                   size="sm"
-                  className="w-full justify-start text-left font-normal"
+                  className="h-7 px-2 justify-start text-xs font-normal"
                   onClick={() => setDateRange(preset.getValue())}
                 >
                   {preset.label}
@@ -197,7 +146,16 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
       <div className="flex items-center gap-2">
         <Switch
           checked={compareEnabled}
-          onCheckedChange={setCompareEnabled}
+          onCheckedChange={(enabled) => {
+            setCompareEnabled(enabled);
+            if (enabled && dateRange?.from && dateRange?.to) {
+              // Set compare range to same period last year
+              setCompareDateRange({
+                from: subYears(dateRange.from, 1),
+                to: subYears(dateRange.to, 1),
+              });
+            }
+          }}
           className="data-[state=checked]:bg-primary"
         />
         <span className="text-sm text-muted-foreground">Comparar</span>
