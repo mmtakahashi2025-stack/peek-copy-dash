@@ -140,6 +140,33 @@ export type Database = {
         }
         Relationships: []
       }
+      lead_records: {
+        Row: {
+          collaborator_name: string
+          created_at: string
+          id: string
+          leads_count: number
+          record_date: string
+          updated_at: string
+        }
+        Insert: {
+          collaborator_name: string
+          created_at?: string
+          id?: string
+          leads_count?: number
+          record_date: string
+          updated_at?: string
+        }
+        Update: {
+          collaborator_name?: string
+          created_at?: string
+          id?: string
+          leads_count?: number
+          record_date?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

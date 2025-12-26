@@ -19,7 +19,7 @@ interface Filters {
 }
 
 export default function Dashboard() {
-  const { rawData, getKpis, getColaboradores, getProdutos, fetchExcellencePercentage } = useSheetData();
+  const { rawData, getKpis, getColaboradores, getProdutos, fetchExcellencePercentage, fetchLeadsTotal } = useSheetData();
   
   const [filters, setFilters] = useState<Filters>({
     dateFrom: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
@@ -43,13 +43,13 @@ export default function Dashboard() {
       // Get base KPIs from sheet data
       const baseKpis = getKpis(filters.filial, { dateFrom: filters.dateFrom, dateTo: filters.dateTo });
       
-      // Fetch excellence percentage for the selected date range
-      const excellencePercentage = await fetchExcellencePercentage({ 
-        dateFrom: filters.dateFrom, 
-        dateTo: filters.dateTo 
-      });
+      // Fetch excellence percentage and leads total for the selected date range
+      const [excellencePercentage, leadsTotal] = await Promise.all([
+        fetchExcellencePercentage({ dateFrom: filters.dateFrom, dateTo: filters.dateTo }),
+        fetchLeadsTotal({ dateFrom: filters.dateFrom, dateTo: filters.dateTo }),
+      ]);
 
-      // Update the Padrão Exc. KPI with the fetched value
+      // Update the database-sourced KPIs with the fetched values
       const updatedKpis = baseKpis.map(kpi => {
         if (kpi.id === 'padrao-exc') {
           return {
@@ -60,6 +60,15 @@ export default function Dashboard() {
             notFound: excellencePercentage === null,
           };
         }
+        if (kpi.id === 'leads') {
+          return {
+            ...kpi,
+            value: leadsTotal !== null ? leadsTotal.toLocaleString('pt-BR') : '--',
+            rawValue: leadsTotal ?? undefined,
+            isPositive: true,
+            notFound: leadsTotal === null,
+          };
+        }
         return kpi;
       });
 
@@ -67,7 +76,7 @@ export default function Dashboard() {
     };
 
     fetchKpis();
-  }, [filters.filial, filters.dateFrom, filters.dateTo, getKpis, fetchExcellencePercentage]);
+  }, [filters.filial, filters.dateFrom, filters.dateTo, getKpis, fetchExcellencePercentage, fetchLeadsTotal]);
 
   const colaboradores = getColaboradores(filters.filial, filters.colaborador);
   const produtos = getProdutos(filters.filial);
