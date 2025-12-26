@@ -22,12 +22,20 @@ export interface RawSaleRow {
   '% Lucro': number;
 }
 
+// Types for KPI targets from database
+interface KpiTarget {
+  kpi_type: string;
+  target_value: number;
+}
+
 // Types for processed data
 export interface KpiData {
   id: string;
   title: string;
   value: string;
+  rawValue?: number;
   meta?: string;
+  targetValue?: number;
   previousValue?: string;
   variation: number;
   isPositive: boolean;
@@ -108,9 +116,28 @@ function normalizeFilialId(filial: string): string {
 
 export function SheetDataProvider({ children }: { children: ReactNode }) {
   const [rawData, setRawData] = useState<RawSaleRow[]>([]);
+  const [kpiTargets, setKpiTargets] = useState<KpiTarget[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sheetUrl, setSheetUrl] = useState<string | null>(null);
+
+  // Fetch KPI targets from database
+  useEffect(() => {
+    const fetchTargets = async () => {
+      const now = new Date();
+      const { data, error } = await supabase
+        .from('kpi_targets')
+        .select('kpi_type, target_value')
+        .eq('month', now.getMonth() + 1)
+        .eq('year', now.getFullYear());
+      
+      if (!error && data) {
+        setKpiTargets(data);
+      }
+    };
+    
+    fetchTargets();
+  }, []);
 
   // Load saved data on mount
   useEffect(() => {
@@ -225,17 +252,35 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       ? rawData 
       : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
 
+    // Helper to get target for a KPI type
+    const getTarget = (kpiType: string): number | undefined => {
+      const target = kpiTargets.find(t => t.kpi_type === kpiType);
+      return target?.target_value;
+    };
+
+    // Helper to format target value for display
+    const formatTarget = (kpiType: string, value: number | undefined): string | undefined => {
+      if (value === undefined) return undefined;
+      if (kpiType === 'faturamento' || kpiType === 'ticket-medio') {
+        return formatCurrency(value);
+      }
+      if (kpiType === 'lucro' || kpiType === 'padrao-exc' || kpiType === 'conversao') {
+        return `${value}%`;
+      }
+      return formatNumber(value);
+    };
+
     if (filteredData.length === 0) {
       // Return all 8 KPIs with notFound state
       return [
-        { id: 'padrao-exc', title: 'Padrão Exc. %', value: '--', meta: '90%', variation: 0, isPositive: true, notFound: true },
-        { id: 'leads', title: 'Leads', value: '--', variation: 0, isPositive: true, notFound: true },
-        { id: 'vendas', title: 'Vendas', value: '--', variation: 0, isPositive: true, notFound: true },
-        { id: 'conversao', title: 'Conversão', value: '--', variation: 0, isPositive: true, notFound: true },
-        { id: 'faturamento', title: 'Faturamento', value: '--', variation: 0, isPositive: true, notFound: true },
-        { id: 'ticket-medio', title: 'Ticket Médio', value: '--', variation: 0, isPositive: true, notFound: true },
-        { id: 'pa', title: 'P.A', value: '--', variation: 0, isPositive: true, notFound: true },
-        { id: 'lucro', title: 'Lucro %', value: '--', variation: 0, isPositive: true, notFound: true },
+        { id: 'padrao-exc', title: 'Padrão Exc. %', value: '--', meta: formatTarget('padrao-exc', getTarget('padrao-exc')) || '90%', targetValue: getTarget('padrao-exc'), variation: 0, isPositive: true, notFound: true },
+        { id: 'leads', title: 'Leads', value: '--', meta: formatTarget('leads', getTarget('leads')), targetValue: getTarget('leads'), variation: 0, isPositive: true, notFound: true },
+        { id: 'vendas', title: 'Vendas', value: '--', meta: formatTarget('vendas', getTarget('vendas')), targetValue: getTarget('vendas'), variation: 0, isPositive: true, notFound: true },
+        { id: 'conversao', title: 'Conversão', value: '--', meta: formatTarget('conversao', getTarget('conversao')), targetValue: getTarget('conversao'), variation: 0, isPositive: true, notFound: true },
+        { id: 'faturamento', title: 'Faturamento', value: '--', meta: formatTarget('faturamento', getTarget('faturamento')), targetValue: getTarget('faturamento'), variation: 0, isPositive: true, notFound: true },
+        { id: 'ticket-medio', title: 'Ticket Médio', value: '--', meta: formatTarget('ticket-medio', getTarget('ticket-medio')), targetValue: getTarget('ticket-medio'), variation: 0, isPositive: true, notFound: true },
+        { id: 'pa', title: 'P.A', value: '--', meta: formatTarget('pa', getTarget('pa')), targetValue: getTarget('pa'), variation: 0, isPositive: true, notFound: true },
+        { id: 'lucro', title: 'Lucro %', value: '--', meta: formatTarget('lucro', getTarget('lucro')), targetValue: getTarget('lucro'), variation: 0, isPositive: true, notFound: true },
       ];
     }
 
@@ -255,7 +300,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         id: 'padrao-exc',
         title: 'Padrão Exc. %',
         value: '--',
-        meta: '90%',
+        meta: formatTarget('padrao-exc', getTarget('padrao-exc')) || '90%',
+        targetValue: getTarget('padrao-exc'),
         variation: 0,
         isPositive: true,
         notFound: true, // Not available in spreadsheet
@@ -264,6 +310,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         id: 'leads',
         title: 'Leads',
         value: '--',
+        meta: formatTarget('leads', getTarget('leads')),
+        targetValue: getTarget('leads'),
         variation: 0,
         isPositive: true,
         notFound: true, // Not available in spreadsheet
@@ -272,6 +320,9 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         id: 'vendas',
         title: 'Vendas',
         value: formatNumber(totalVendas),
+        rawValue: totalVendas,
+        meta: formatTarget('vendas', getTarget('vendas')),
+        targetValue: getTarget('vendas'),
         previousValue: undefined,
         variation: 0,
         isPositive: true,
@@ -281,6 +332,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         id: 'conversao',
         title: 'Conversão',
         value: '--',
+        meta: formatTarget('conversao', getTarget('conversao')),
+        targetValue: getTarget('conversao'),
         variation: 0,
         isPositive: true,
         notFound: true, // Needs leads to calculate
@@ -289,6 +342,9 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         id: 'faturamento',
         title: 'Faturamento',
         value: formatCurrency(totalFaturamento),
+        rawValue: totalFaturamento,
+        meta: formatTarget('faturamento', getTarget('faturamento')),
+        targetValue: getTarget('faturamento'),
         previousValue: undefined,
         variation: 0,
         isPositive: true,
@@ -298,6 +354,9 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         id: 'ticket-medio',
         title: 'Ticket Médio',
         value: `R$ ${ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        rawValue: ticketMedio,
+        meta: formatTarget('ticket-medio', getTarget('ticket-medio')),
+        targetValue: getTarget('ticket-medio'),
         previousValue: undefined,
         variation: 0,
         isPositive: true,
@@ -307,6 +366,9 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         id: 'pa',
         title: 'P.A',
         value: pa.toFixed(1),
+        rawValue: pa,
+        meta: formatTarget('pa', getTarget('pa')),
+        targetValue: getTarget('pa'),
         previousValue: undefined,
         variation: 0,
         isPositive: true,
@@ -316,13 +378,16 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         id: 'lucro',
         title: 'Lucro %',
         value: `${lucroPercent.toFixed(1)}%`,
+        rawValue: lucroPercent,
+        meta: formatTarget('lucro', getTarget('lucro')),
+        targetValue: getTarget('lucro'),
         previousValue: undefined,
         variation: 0,
         isPositive: lucroPercent > 0,
         notFound: false,
       },
     ];
-  }, [rawData]);
+  }, [rawData, kpiTargets]);
 
   // Calculate colaboradores ranking
   const getColaboradores = useCallback((filialId: string, colaboradorId?: string): ColaboradorData[] => {

@@ -69,7 +69,9 @@ export default function Dashboard() {
               key={kpi.id}
               title={kpi.title}
               value={kpi.value}
+              rawValue={kpi.rawValue}
               meta={kpi.meta}
+              targetValue={kpi.targetValue}
               previousValue={kpi.previousValue}
               variation={kpi.variation}
               isPositive={kpi.isPositive}
