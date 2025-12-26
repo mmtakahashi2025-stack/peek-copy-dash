@@ -4,7 +4,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { CalendarIcon, ArrowLeftRight } from 'lucide-react';
+import { CalendarIcon, ArrowLeftRight, Search } from 'lucide-react';
 import { format, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -168,6 +168,14 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
           ))}
         </SelectContent>
       </Select>
+
+      <div className="h-6 w-px bg-border mx-1 hidden sm:block" />
+
+      {/* Filtrar Button */}
+      <Button className="gap-2">
+        <Search className="h-4 w-4" />
+        Filtrar
+      </Button>
     </div>
   );
 }
