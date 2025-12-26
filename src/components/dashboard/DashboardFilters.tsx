@@ -5,11 +5,78 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { CalendarIcon, ArrowLeftRight, Search, Loader2 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays, subMonths, startOfYear, endOfYear } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { useSheetData } from '@/contexts/SheetDataContext';
 import { DateRange } from 'react-day-picker';
+
+type DatePreset = {
+  label: string;
+  getValue: () => DateRange;
+};
+
+const datePresets: DatePreset[] = [
+  {
+    label: 'Hoje',
+    getValue: () => {
+      const today = new Date();
+      return { from: today, to: today };
+    },
+  },
+  {
+    label: 'Ontem',
+    getValue: () => {
+      const yesterday = subDays(new Date(), 1);
+      return { from: yesterday, to: yesterday };
+    },
+  },
+  {
+    label: 'Últimos 7 dias',
+    getValue: () => ({
+      from: subDays(new Date(), 6),
+      to: new Date(),
+    }),
+  },
+  {
+    label: 'Últimos 30 dias',
+    getValue: () => ({
+      from: subDays(new Date(), 29),
+      to: new Date(),
+    }),
+  },
+  {
+    label: 'Esta semana',
+    getValue: () => ({
+      from: startOfWeek(new Date(), { locale: ptBR }),
+      to: endOfWeek(new Date(), { locale: ptBR }),
+    }),
+  },
+  {
+    label: 'Este mês',
+    getValue: () => ({
+      from: startOfMonth(new Date()),
+      to: endOfMonth(new Date()),
+    }),
+  },
+  {
+    label: 'Mês passado',
+    getValue: () => {
+      const lastMonth = subMonths(new Date(), 1);
+      return {
+        from: startOfMonth(lastMonth),
+        to: endOfMonth(lastMonth),
+      };
+    },
+  },
+  {
+    label: 'Este ano',
+    getValue: () => ({
+      from: startOfYear(new Date()),
+      to: endOfYear(new Date()),
+    }),
+  },
+];
 
 interface DashboardFiltersProps {
   onFiltersChange?: (filters: {
@@ -99,15 +166,30 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
-          <Calendar
-            mode="range"
-            selected={dateRange}
-            onSelect={setDateRange}
-            locale={ptBR}
-            numberOfMonths={2}
-            initialFocus
-            className="p-3 pointer-events-auto"
-          />
+          <div className="flex">
+            <div className="border-r p-2 space-y-1">
+              {datePresets.map((preset) => (
+                <Button
+                  key={preset.label}
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start text-left font-normal"
+                  onClick={() => setDateRange(preset.getValue())}
+                >
+                  {preset.label}
+                </Button>
+              ))}
+            </div>
+            <Calendar
+              mode="range"
+              selected={dateRange}
+              onSelect={setDateRange}
+              locale={ptBR}
+              numberOfMonths={2}
+              initialFocus
+              className="p-3 pointer-events-auto"
+            />
+          </div>
         </PopoverContent>
       </Popover>
 
