@@ -4,10 +4,7 @@ import { LogOut } from 'lucide-react';
 import comboLogo from '@/assets/combo-iguassu-logo.png';
 import { SheetConfigDialog } from './SheetConfigDialog';
 
-interface DashboardHeaderProps {
-  onSheetDataLoaded?: (data: Record<string, string | number>[]) => void;
-}
-export function DashboardHeader({ onSheetDataLoaded }: DashboardHeaderProps) {
+export function DashboardHeader() {
   const { user, signOut } = useAuth();
 
   return (
@@ -22,7 +19,7 @@ export function DashboardHeader({ onSheetDataLoaded }: DashboardHeaderProps) {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
-          <SheetConfigDialog onDataLoaded={onSheetDataLoaded} />
+          <SheetConfigDialog />
           <span className="text-sm text-muted-foreground hidden md:block">
             {user?.email}
           </span>
