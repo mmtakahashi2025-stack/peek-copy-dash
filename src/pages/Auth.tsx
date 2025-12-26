@@ -61,8 +61,8 @@ export default function Auth() {
       {/* Left Panel - Branding */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary via-primary/90 to-accent p-12 flex-col justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-primary-foreground">Profit Peeks</h1>
-          <p className="text-primary-foreground/80 mt-2">Dashboard de Vendas</p>
+          <h1 className="text-3xl font-bold text-primary-foreground">Sales Ops</h1>
+          <p className="text-primary-foreground/80 mt-2">Combo Iguassu - Dashboard de Vendas</p>
         </div>
         
         <div className="space-y-8">
@@ -97,7 +97,7 @@ export default function Auth() {
           </div>
         </div>
         
-        <p className="text-primary-foreground/60 text-sm">© 2024 Profit Peeks Hub</p>
+        <p className="text-primary-foreground/60 text-sm">© 2024 Sales Ops - Combo Iguassu</p>
       </div>
       
       {/* Right Panel - Auth Form */}
@@ -105,7 +105,7 @@ export default function Auth() {
         <Card className="w-full max-w-md border-0 shadow-xl">
           <CardHeader className="text-center pb-2">
             <div className="lg:hidden mb-4">
-              <h1 className="text-2xl font-bold text-primary">Profit Peeks</h1>
+              <h1 className="text-2xl font-bold text-primary">Sales Ops</h1>
             </div>
             <CardTitle className="text-2xl font-bold">Bem-vindo!</CardTitle>
             <CardDescription>Entre ou crie sua conta para continuar</CardDescription>
