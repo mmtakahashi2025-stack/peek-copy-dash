@@ -504,33 +504,55 @@ export default function ExcellenceStandard() {
       ? monthEvaluations.reduce((sum, e) => sum + (e.percentage || 0), 0) / totalEvaluations 
       : 0;
 
-    const gridRows = daysInMonth.map((day) => {
-      const dateStr = format(day, 'yyyy-MM-dd');
-      const evaluation = monthEvaluations.find(e => e.evaluation_date === dateStr);
-      
-      if (!evaluation) {
-        return `
-          <tr>
-            <td style="border: 1px solid #ddd; padding: 6px; text-align: center;">${format(day, 'dd')}</td>
-            <td style="border: 1px solid #ddd; padding: 6px; text-align: center; color: #999;">-</td>
-            <td style="border: 1px solid #ddd; padding: 6px; text-align: center; color: #999;">-</td>
-            <td style="border: 1px solid #ddd; padding: 6px; text-align: center; color: #999;">-</td>
-          </tr>
-        `;
-      }
+    // Generate detailed evaluation blocks
+    const evaluationDetails = monthEvaluations
+      .sort((a, b) => a.evaluation_date.localeCompare(b.evaluation_date))
+      .map((evaluation) => {
+        const pct = evaluation.percentage || 0;
+        const scoreRows = criteria.map((c) => {
+          const score = evaluation.scores[c.id];
+          const scoreLabel = score === 1 ? 'SIM' : score === 0 ? 'NÃO' : score === -1 ? 'N/A' : '-';
+          const scoreColor = score === 1 ? 'green' : score === 0 ? 'red' : '#666';
+          return `
+            <tr>
+              <td style="border: 1px solid #ddd; padding: 4px 8px; font-size: 11px;">${c.code}</td>
+              <td style="border: 1px solid #ddd; padding: 4px 8px; font-size: 11px;">${c.description}</td>
+              <td style="border: 1px solid #ddd; padding: 4px 8px; text-align: center; font-weight: bold; color: ${scoreColor}; font-size: 11px;">
+                ${scoreLabel}
+              </td>
+            </tr>
+          `;
+        }).join('');
 
-      const pct = evaluation.percentage || 0;
-      return `
-        <tr>
-          <td style="border: 1px solid #ddd; padding: 6px; text-align: center; font-weight: bold;">${format(day, 'dd')}</td>
-          <td style="border: 1px solid #ddd; padding: 6px; text-align: center;">${evaluation.conversation_number || '-'}</td>
-          <td style="border: 1px solid #ddd; padding: 6px; text-align: center; font-weight: bold; color: ${pct >= 85 ? 'green' : 'red'};">
-            ${pct.toFixed(0)}%
-          </td>
-          <td style="border: 1px solid #ddd; padding: 6px; text-align: center; font-size: 11px;">${evaluation.evaluator_email || '-'}</td>
-        </tr>
-      `;
-    }).join('');
+        return `
+          <div class="evaluation-block" style="page-break-inside: avoid; margin-bottom: 25px; border: 1px solid #ddd; border-radius: 4px; padding: 15px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
+              <div>
+                <strong style="font-size: 14px;">Dia ${format(new Date(evaluation.evaluation_date), 'dd/MM/yyyy')}</strong>
+                <span style="color: #666; font-size: 12px; margin-left: 10px;">Conversa: ${evaluation.conversation_number || '-'}</span>
+              </div>
+              <div style="background: ${pct >= 85 ? '#d4edda' : '#f8d7da'}; padding: 5px 15px; border-radius: 4px;">
+                <strong style="color: ${pct >= 85 ? '#155724' : '#721c24'}; font-size: 16px;">${pct.toFixed(0)}%</strong>
+              </div>
+            </div>
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr>
+                  <th style="background: #f5f5f5; padding: 6px; text-align: left; font-size: 11px; border: 1px solid #ddd; width: 60px;">Código</th>
+                  <th style="background: #f5f5f5; padding: 6px; text-align: left; font-size: 11px; border: 1px solid #ddd;">Critério</th>
+                  <th style="background: #f5f5f5; padding: 6px; text-align: center; font-size: 11px; border: 1px solid #ddd; width: 70px;">Resultado</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${scoreRows}
+              </tbody>
+            </table>
+            <div style="margin-top: 8px; font-size: 11px; color: #666;">
+              Avaliador: ${evaluation.evaluator_email || '-'}
+            </div>
+          </div>
+        `;
+      }).join('');
 
     const printContent = `
       <!DOCTYPE html>
@@ -538,22 +560,21 @@ export default function ExcellenceStandard() {
       <head>
         <title>Grade Mensal - ${collaboratorName}</title>
         <style>
-          body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+          body { font-family: Arial, sans-serif; padding: 20px; max-width: 900px; margin: 0 auto; }
           .header { border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 20px; }
           .info-section { background: #f5f5f5; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
           .info-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
           .info-label { color: #666; font-size: 13px; }
           .info-value { font-weight: bold; font-size: 14px; }
-          table { width: 100%; border-collapse: collapse; }
-          th { background: #333; color: white; padding: 8px; text-align: center; font-size: 12px; }
-          .summary { margin-top: 20px; display: flex; gap: 20px; justify-content: center; }
+          .summary { margin-bottom: 25px; display: flex; gap: 20px; justify-content: center; }
           .summary-item { background: #f5f5f5; padding: 15px 25px; border-radius: 4px; text-align: center; }
           .summary-label { font-size: 12px; color: #666; }
           .summary-value { font-size: 24px; font-weight: bold; }
-          .signature { margin-top: 40px; display: flex; justify-content: space-between; }
+          .signature { margin-top: 40px; display: flex; justify-content: space-between; page-break-inside: avoid; }
           .signature-line { width: 45%; text-align: center; }
           .signature-line hr { margin-bottom: 5px; }
           .signature-line span { font-size: 12px; color: #666; }
+          .no-evaluations { text-align: center; padding: 40px; color: #666; }
           @media print { body { padding: 0; } }
         </style>
       </head>
@@ -571,20 +592,6 @@ export default function ExcellenceStandard() {
           </div>
         </div>
 
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 50px;">Dia</th>
-              <th>Nº Conversa</th>
-              <th style="width: 80px;">Resultado</th>
-              <th>Avaliador</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${gridRows}
-          </tbody>
-        </table>
-
         <div class="summary">
           <div class="summary-item">
             <div class="summary-label">Total de Avaliações</div>
@@ -597,6 +604,11 @@ export default function ExcellenceStandard() {
             </div>
           </div>
         </div>
+
+        ${totalEvaluations === 0 
+          ? '<div class="no-evaluations">Nenhuma avaliação registrada neste período.</div>'
+          : `<h3 style="margin-bottom: 15px; font-size: 14px; color: #333;">Detalhamento das Avaliações</h3>${evaluationDetails}`
+        }
 
         <div class="signature">
           <div class="signature-line">
