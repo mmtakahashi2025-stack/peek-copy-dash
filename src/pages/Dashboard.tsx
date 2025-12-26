@@ -40,14 +40,18 @@ export default function Dashboard() {
   // Fetch KPIs when filters change
   useEffect(() => {
     const fetchKpis = async () => {
-      // Get base KPIs from sheet data
-      const baseKpis = getKpis(filters.filial, { dateFrom: filters.dateFrom, dateTo: filters.dateTo });
-      
       // Fetch excellence percentage and leads total for the selected date range
       const [excellencePercentage, leadsTotal] = await Promise.all([
         fetchExcellencePercentage({ dateFrom: filters.dateFrom, dateTo: filters.dateTo }),
         fetchLeadsTotal({ dateFrom: filters.dateFrom, dateTo: filters.dateTo }),
       ]);
+
+      // Get base KPIs from sheet data, passing leads for conversion calculation
+      const baseKpis = getKpis(
+        filters.filial, 
+        { dateFrom: filters.dateFrom, dateTo: filters.dateTo },
+        leadsTotal ?? undefined // Pass leads recebidos for conversion calculation
+      );
 
       // Update the database-sourced KPIs with the fetched values
       const updatedKpis = baseKpis.map(kpi => {
