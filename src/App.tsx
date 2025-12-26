@@ -8,6 +8,7 @@ import { SheetDataProvider } from "./contexts/SheetDataContext";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Targets from "./pages/Targets";
+import ExcellenceStandard from "./pages/ExcellenceStandard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -25,6 +26,7 @@ function App() {
               <Route path="/" element={<Index />} />
                 <Route path="/auth" element={<Auth />} />
                 <Route path="/metas" element={<Targets />} />
+                <Route path="/padrao-excelencia" element={<ExcellenceStandard />} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>

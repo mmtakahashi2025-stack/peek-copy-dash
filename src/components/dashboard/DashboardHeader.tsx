@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { LogOut, Target } from 'lucide-react';
+import { LogOut, Target, Award } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import comboLogo from '@/assets/combo-iguassu-logo.png';
 import { SheetConfigDialog } from './SheetConfigDialog';
@@ -24,6 +24,12 @@ export function DashboardHeader() {
             <Link to="/metas">
               <Target className="h-4 w-4" />
               <span className="hidden sm:inline">Metas</span>
+            </Link>
+          </Button>
+          <Button variant="ghost" size="sm" asChild className="gap-2">
+            <Link to="/padrao-excelencia">
+              <Award className="h-4 w-4" />
+              <span className="hidden sm:inline">Padrão</span>
             </Link>
           </Button>
           <SheetConfigDialog />

@@ -14,6 +14,99 @@ export type Database = {
   }
   public: {
     Tables: {
+      excellence_criteria: {
+        Row: {
+          code: string
+          created_at: string
+          description: string
+          id: string
+          is_active: boolean
+          order_index: number
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          description: string
+          id?: string
+          is_active?: boolean
+          order_index?: number
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          description?: string
+          id?: string
+          is_active?: boolean
+          order_index?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      excellence_evaluations: {
+        Row: {
+          collaborator_name: string
+          created_at: string
+          evaluation_date: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          collaborator_name: string
+          created_at?: string
+          evaluation_date: string
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          collaborator_name?: string
+          created_at?: string
+          evaluation_date?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      excellence_scores: {
+        Row: {
+          created_at: string
+          criteria_id: string
+          evaluation_id: string
+          id: string
+          score: number | null
+        }
+        Insert: {
+          created_at?: string
+          criteria_id: string
+          evaluation_id: string
+          id?: string
+          score?: number | null
+        }
+        Update: {
+          created_at?: string
+          criteria_id?: string
+          evaluation_id?: string
+          id?: string
+          score?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "excellence_scores_criteria_id_fkey"
+            columns: ["criteria_id"]
+            isOneToOne: false
+            referencedRelation: "excellence_criteria"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "excellence_scores_evaluation_id_fkey"
+            columns: ["evaluation_id"]
+            isOneToOne: false
+            referencedRelation: "excellence_evaluations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       kpi_targets: {
         Row: {
           created_at: string
