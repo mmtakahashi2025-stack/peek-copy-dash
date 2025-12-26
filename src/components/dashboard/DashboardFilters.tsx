@@ -5,10 +5,10 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { CalendarIcon, ArrowLeftRight, Search, Loader2 } from 'lucide-react';
-import { format, subMonths } from 'date-fns';
+import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
-import { filiaisData, colaboradoresData } from '@/data/mockData';
+import { useSheetData } from '@/contexts/SheetDataContext';
 import { DateRange } from 'react-day-picker';
 
 interface DashboardFiltersProps {
@@ -24,6 +24,8 @@ interface DashboardFiltersProps {
 }
 
 export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
+  const { filiais, getColaboradores } = useSheetData();
+  
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: new Date(2024, 11, 1),
     to: new Date(2024, 11, 31),
@@ -37,10 +39,8 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
   const [colaborador, setColaborador] = useState('todos');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Filtrar colaboradores baseado na filial selecionada
-  const filteredColaboradores = filial === 'todas' 
-    ? colaboradoresData 
-    : colaboradoresData.filter(c => c.filial === filial);
+  // Get colaboradores based on selected filial
+  const colaboradoresData = getColaboradores(filial);
 
   // Aplicar filtros iniciais ao montar o componente
   useEffect(() => {
@@ -51,7 +51,7 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
     setIsLoading(true);
     
     // Simular tempo de busca
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await new Promise(resolve => setTimeout(resolve, 300));
     
     onFiltersChange?.({
       dateFrom: dateRange?.from,
@@ -69,12 +69,12 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
   // Reset colaborador quando mudar filial
   useEffect(() => {
     if (filial !== 'todas') {
-      const colaboradorExiste = filteredColaboradores.some(c => c.id.toString() === colaborador);
+      const colaboradorExiste = colaboradoresData.some(c => c.id.toString() === colaborador);
       if (!colaboradorExiste && colaborador !== 'todos') {
         setColaborador('todos');
       }
     }
-  }, [filial, colaborador, filteredColaboradores]);
+  }, [filial, colaborador, colaboradoresData]);
 
   const formatDateRange = (range: DateRange | undefined) => {
     if (!range?.from) return 'Selecionar período';
@@ -159,7 +159,7 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
           <SelectValue placeholder="Selecione a filial" />
         </SelectTrigger>
         <SelectContent>
-          {filiaisData.map((f) => (
+          {filiais.map((f) => (
             <SelectItem key={f.id} value={f.id}>
               {f.nome}
             </SelectItem>
@@ -174,7 +174,7 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="todos">Todos os Colaboradores</SelectItem>
-          {filteredColaboradores.map((c) => (
+          {colaboradoresData.map((c) => (
             <SelectItem key={c.id} value={c.id.toString()}>
               {c.nome}
             </SelectItem>
