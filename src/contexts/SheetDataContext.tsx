@@ -130,7 +130,39 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const loadSheet = useCallback(async (url: string) => {
+  // Subscribe to realtime updates from other users
+  useEffect(() => {
+    const channel = supabase
+      .channel('sheet-data-sync')
+      .on('broadcast', { event: 'sheet-updated' }, (payload) => {
+        console.log('Received sheet update from another user');
+        const { data, url } = payload.payload as { data: RawSaleRow[]; url: string };
+        
+        if (data && Array.isArray(data)) {
+          setRawData(data);
+          setSheetUrl(url);
+          localStorage.setItem(SHEET_URL_KEY, url);
+          localStorage.setItem(SHEET_DATA_KEY, JSON.stringify(data));
+          toast.info('Dados atualizados por outro usuário');
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const broadcastUpdate = useCallback(async (data: RawSaleRow[], url: string) => {
+    const channel = supabase.channel('sheet-data-sync');
+    await channel.send({
+      type: 'broadcast',
+      event: 'sheet-updated',
+      payload: { data, url },
+    });
+  }, []);
+
+  const loadSheet = useCallback(async (url: string, broadcast = true) => {
     setIsLoading(true);
     setError(null);
 
@@ -155,6 +187,11 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(SHEET_URL_KEY, url);
       localStorage.setItem(SHEET_DATA_KEY, JSON.stringify(data));
       
+      // Broadcast to other users
+      if (broadcast) {
+        await broadcastUpdate(data, url);
+      }
+      
       toast.success(`${data.length} registros carregados da planilha`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
@@ -163,11 +200,11 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [broadcastUpdate]);
 
   const refreshData = useCallback(async () => {
     if (sheetUrl) {
-      await loadSheet(sheetUrl);
+      await loadSheet(sheetUrl, true);
     }
   }, [sheetUrl, loadSheet]);
 
