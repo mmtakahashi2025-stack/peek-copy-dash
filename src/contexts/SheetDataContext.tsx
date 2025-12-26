@@ -40,6 +40,7 @@ export interface KpiData {
   variation: number;
   isPositive: boolean;
   notFound?: boolean;
+  source?: 'sheet' | 'database'; // Indicates the data source
 }
 
 export interface ColaboradorData {
@@ -439,15 +440,16 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
           targetValue: getTarget('padrao_exc'), 
           variation: 0, 
           isPositive: excellencePercentage !== null ? excellencePercentage >= 90 : true, 
-          notFound: excellencePercentage === null 
+          notFound: excellencePercentage === null,
+          source: 'database' as const,
         },
-        { id: 'leads', title: 'Leads', value: '--', meta: formatTarget('leads', getTarget('leads')), targetValue: getTarget('leads'), variation: 0, isPositive: true, notFound: true },
-        { id: 'vendas', title: 'Vendas', value: '--', meta: formatTarget('vendas', getTarget('vendas')), targetValue: getTarget('vendas'), variation: 0, isPositive: true, notFound: true },
-        { id: 'conversao', title: 'Conversão', value: '--', meta: formatTarget('conversao', getTarget('conversao')), targetValue: getTarget('conversao'), variation: 0, isPositive: true, notFound: true },
-        { id: 'faturamento', title: 'Faturamento', value: '--', meta: formatTarget('faturamento', getTarget('faturamento')), targetValue: getTarget('faturamento'), variation: 0, isPositive: true, notFound: true },
-        { id: 'ticket-medio', title: 'Ticket Médio', value: '--', meta: formatTarget('ticket-medio', getTarget('ticket-medio')), targetValue: getTarget('ticket-medio'), variation: 0, isPositive: true, notFound: true },
-        { id: 'pa', title: 'P.A', value: '--', meta: formatTarget('pa', getTarget('pa')), targetValue: getTarget('pa'), variation: 0, isPositive: true, notFound: true },
-        { id: 'lucro', title: 'Lucro %', value: '--', meta: formatTarget('lucro', getTarget('lucro')), targetValue: getTarget('lucro'), variation: 0, isPositive: true, notFound: true },
+        { id: 'leads', title: 'Leads', value: '--', meta: formatTarget('leads', getTarget('leads')), targetValue: getTarget('leads'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
+        { id: 'vendas', title: 'Vendas', value: '--', meta: formatTarget('vendas', getTarget('vendas')), targetValue: getTarget('vendas'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
+        { id: 'conversao', title: 'Conversão', value: '--', meta: formatTarget('conversao', getTarget('conversao')), targetValue: getTarget('conversao'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
+        { id: 'faturamento', title: 'Faturamento', value: '--', meta: formatTarget('faturamento', getTarget('faturamento')), targetValue: getTarget('faturamento'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
+        { id: 'ticket-medio', title: 'Ticket Médio', value: '--', meta: formatTarget('ticket-medio', getTarget('ticket-medio')), targetValue: getTarget('ticket-medio'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
+        { id: 'pa', title: 'P.A', value: '--', meta: formatTarget('pa', getTarget('pa')), targetValue: getTarget('pa'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
+        { id: 'lucro', title: 'Lucro %', value: '--', meta: formatTarget('lucro', getTarget('lucro')), targetValue: getTarget('lucro'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
       ];
     }
 
@@ -473,6 +475,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         variation: 0,
         isPositive: excellencePercentage !== null ? excellencePercentage >= 90 : true,
         notFound: excellencePercentage === null,
+        source: 'database' as const,
       },
       {
         id: 'leads',
@@ -482,7 +485,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         targetValue: getTarget('leads'),
         variation: 0,
         isPositive: true,
-        notFound: true, // Not available in spreadsheet
+        notFound: true,
+        source: 'sheet' as const,
       },
       {
         id: 'vendas',
@@ -495,6 +499,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         variation: 0,
         isPositive: true,
         notFound: false,
+        source: 'sheet' as const,
       },
       {
         id: 'conversao',
@@ -504,7 +509,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         targetValue: getTarget('conversao'),
         variation: 0,
         isPositive: true,
-        notFound: true, // Needs leads to calculate
+        notFound: true,
+        source: 'sheet' as const,
       },
       {
         id: 'faturamento',
@@ -517,6 +523,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         variation: 0,
         isPositive: true,
         notFound: false,
+        source: 'sheet' as const,
       },
       {
         id: 'ticket-medio',
@@ -529,6 +536,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         variation: 0,
         isPositive: true,
         notFound: false,
+        source: 'sheet' as const,
       },
       {
         id: 'pa',
@@ -541,6 +549,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         variation: 0,
         isPositive: true,
         notFound: false,
+        source: 'sheet' as const,
       },
       {
         id: 'lucro',
@@ -553,6 +562,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         variation: 0,
         isPositive: lucroPercent > 0,
         notFound: false,
+        source: 'sheet' as const,
       },
     ];
   }, [rawData, kpiTargets, excellencePercentage]);

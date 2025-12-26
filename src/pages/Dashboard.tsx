@@ -109,6 +109,7 @@ export default function Dashboard() {
               variation={kpi.variation}
               isPositive={kpi.isPositive}
               notFound={kpi.notFound}
+              source={kpi.source}
             />
           ))}
         </div>
