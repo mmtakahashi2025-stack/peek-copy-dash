@@ -1,4 +1,5 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -35,6 +36,17 @@ function parseDelimited(text: string, delimiter: string = ','): SheetRow[] {
   return rows;
 }
 
+// Validate that URL is a Google Sheets URL to prevent SSRF attacks
+function isValidGoogleSheetsUrl(url: string): boolean {
+  try {
+    const parsedUrl = new URL(url);
+    return parsedUrl.hostname === 'docs.google.com' && 
+           parsedUrl.pathname.includes('/spreadsheets/');
+  } catch {
+    return false;
+  }
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -42,11 +54,47 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Verify JWT token for authentication
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      console.error('Missing Authorization header');
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized - Missing authorization header' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
+    if (authError || !user) {
+      console.error('Auth error:', authError?.message || 'No user found');
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized - Invalid token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Authenticated user:', user.id);
+
     const { sheetUrl, sheetName } = await req.json();
     
     if (!sheetUrl) {
       return new Response(
         JSON.stringify({ error: 'URL da planilha é obrigatória' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Validate URL to prevent SSRF attacks - only allow Google Sheets URLs
+    if (!isValidGoogleSheetsUrl(sheetUrl)) {
+      console.error('Invalid URL attempted:', sheetUrl);
+      return new Response(
+        JSON.stringify({ error: 'Apenas URLs do Google Sheets são permitidas' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
