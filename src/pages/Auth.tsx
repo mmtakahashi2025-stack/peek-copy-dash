@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { TrendingUp, BarChart3, Users } from 'lucide-react';
+import comboLogo from '@/assets/combo-iguassu-logo.png';
 
 export default function Auth() {
   const [email, setEmail] = useState('');
@@ -60,9 +61,12 @@ export default function Auth() {
     <div className="min-h-screen flex">
       {/* Left Panel - Branding */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary via-primary/90 to-accent p-12 flex-col justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-primary-foreground">Sales Ops</h1>
-          <p className="text-primary-foreground/80 mt-2">Combo Iguassu - Dashboard de Vendas</p>
+        <div className="flex items-center gap-4">
+          <img src={comboLogo} alt="Combo Iguassu" className="h-16 w-16 rounded-xl object-contain bg-white/10 p-2" />
+          <div>
+            <h1 className="text-3xl font-bold text-primary-foreground">Sales Ops</h1>
+            <p className="text-primary-foreground/80 mt-2">Combo Iguassu - Dashboard de Vendas</p>
+          </div>
         </div>
         
         <div className="space-y-8">
@@ -104,7 +108,8 @@ export default function Auth() {
       <div className="flex-1 flex items-center justify-center p-8 bg-background">
         <Card className="w-full max-w-md border-0 shadow-xl">
           <CardHeader className="text-center pb-2">
-            <div className="lg:hidden mb-4">
+            <div className="lg:hidden mb-4 flex items-center justify-center gap-3">
+              <img src={comboLogo} alt="Combo Iguassu" className="h-12 w-12 rounded-lg object-contain" />
               <h1 className="text-2xl font-bold text-primary">Sales Ops</h1>
             </div>
             <CardTitle className="text-2xl font-bold">Bem-vindo!</CardTitle>
