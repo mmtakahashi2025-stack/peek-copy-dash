@@ -117,6 +117,7 @@ function normalizeFilialId(filial: string): string {
 export function SheetDataProvider({ children }: { children: ReactNode }) {
   const [rawData, setRawData] = useState<RawSaleRow[]>([]);
   const [kpiTargets, setKpiTargets] = useState<KpiTarget[]>([]);
+  const [excellencePercentage, setExcellencePercentage] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sheetUrl, setSheetUrl] = useState<string | null>(null);
@@ -137,6 +138,49 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     };
     
     fetchTargets();
+  }, []);
+
+  // Fetch excellence evaluations from database to calculate Padrão Exc. %
+  useEffect(() => {
+    const fetchExcellenceData = async () => {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+      // Get evaluations for current month
+      const { data: evaluations, error: evalError } = await supabase
+        .from('excellence_evaluations')
+        .select('id')
+        .gte('evaluation_date', startOfMonth)
+        .lte('evaluation_date', endOfMonth);
+
+      if (evalError || !evaluations || evaluations.length === 0) {
+        setExcellencePercentage(null);
+        return;
+      }
+
+      const evalIds = evaluations.map(e => e.id);
+
+      // Get scores for these evaluations
+      const { data: scores, error: scoresError } = await supabase
+        .from('excellence_scores')
+        .select('score')
+        .in('evaluation_id', evalIds);
+
+      if (scoresError || !scores) {
+        setExcellencePercentage(null);
+        return;
+      }
+
+      // Calculate percentage: valid scores (not -1), count positives (1)
+      const validScores = scores.filter(s => s.score !== null && s.score !== -1);
+      const positiveScores = validScores.filter(s => s.score === 1).length;
+      const percentage = validScores.length > 0 ? (positiveScores / validScores.length) * 100 : null;
+      
+      setExcellencePercentage(percentage);
+    };
+
+    fetchExcellenceData();
   }, []);
 
   // Load saved data on mount - using sessionStorage for security (clears on tab close)
@@ -333,9 +377,19 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     };
 
     if (filteredData.length === 0) {
-      // Return all 8 KPIs with notFound state
+      // Return all 8 KPIs - Padrão Exc. uses database data, others with notFound state
       return [
-        { id: 'padrao-exc', title: 'Padrão Exc. %', value: '--', meta: formatTarget('padrao-exc', getTarget('padrao-exc')) || '90%', targetValue: getTarget('padrao-exc'), variation: 0, isPositive: true, notFound: true },
+        { 
+          id: 'padrao-exc', 
+          title: 'Padrão Exc. %', 
+          value: excellencePercentage !== null ? `${excellencePercentage.toFixed(1)}%` : '--',
+          rawValue: excellencePercentage ?? undefined,
+          meta: formatTarget('padrao_exc', getTarget('padrao_exc')) || '90%', 
+          targetValue: getTarget('padrao_exc'), 
+          variation: 0, 
+          isPositive: excellencePercentage !== null ? excellencePercentage >= 90 : true, 
+          notFound: excellencePercentage === null 
+        },
         { id: 'leads', title: 'Leads', value: '--', meta: formatTarget('leads', getTarget('leads')), targetValue: getTarget('leads'), variation: 0, isPositive: true, notFound: true },
         { id: 'vendas', title: 'Vendas', value: '--', meta: formatTarget('vendas', getTarget('vendas')), targetValue: getTarget('vendas'), variation: 0, isPositive: true, notFound: true },
         { id: 'conversao', title: 'Conversão', value: '--', meta: formatTarget('conversao', getTarget('conversao')), targetValue: getTarget('conversao'), variation: 0, isPositive: true, notFound: true },
@@ -361,12 +415,13 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       {
         id: 'padrao-exc',
         title: 'Padrão Exc. %',
-        value: '--',
-        meta: formatTarget('padrao-exc', getTarget('padrao-exc')) || '90%',
-        targetValue: getTarget('padrao-exc'),
+        value: excellencePercentage !== null ? `${excellencePercentage.toFixed(1)}%` : '--',
+        rawValue: excellencePercentage ?? undefined,
+        meta: formatTarget('padrao_exc', getTarget('padrao_exc')) || '90%',
+        targetValue: getTarget('padrao_exc'),
         variation: 0,
-        isPositive: true,
-        notFound: true, // Not available in spreadsheet
+        isPositive: excellencePercentage !== null ? excellencePercentage >= 90 : true,
+        notFound: excellencePercentage === null,
       },
       {
         id: 'leads',
@@ -449,7 +504,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         notFound: false,
       },
     ];
-  }, [rawData, kpiTargets]);
+  }, [rawData, kpiTargets, excellencePercentage]);
 
   // Calculate colaboradores ranking
   const getColaboradores = useCallback((filialId: string, colaboradorId?: string): ColaboradorData[] => {
