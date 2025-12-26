@@ -4,7 +4,6 @@ import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { RankingCard } from '@/components/dashboard/RankingCard';
 import { SalesEvolutionChart } from '@/components/dashboard/SalesEvolutionChart';
-import { ComparisonCard } from '@/components/dashboard/ComparisonCard';
 import { getFilteredKpis, getFilteredColaboradores } from '@/data/mockData';
 
 interface Filters {
@@ -12,14 +11,20 @@ interface Filters {
   dateTo: Date | undefined;
   filial: string;
   colaborador: string;
+  compareEnabled: boolean;
+  compareDateFrom: Date | undefined;
+  compareDateTo: Date | undefined;
 }
 
 export default function Dashboard() {
   const [filters, setFilters] = useState<Filters>({
-    dateFrom: new Date(2024, 0, 1),
-    dateTo: new Date(),
+    dateFrom: new Date(2024, 11, 1),
+    dateTo: new Date(2024, 11, 31),
     filial: 'todas',
     colaborador: 'todos',
+    compareEnabled: false,
+    compareDateFrom: new Date(2024, 10, 1),
+    compareDateTo: new Date(2024, 10, 30),
   });
 
   const handleFiltersChange = useCallback((newFilters: Filters) => {
@@ -53,14 +58,9 @@ export default function Dashboard() {
           ))}
         </div>
         
-        {/* Charts and Comparison Row */}
+        {/* Chart and Ranking Side by Side */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <SalesEvolutionChart />
-          <ComparisonCard />
-        </div>
-        
-        {/* Ranking */}
-        <div className="grid grid-cols-1">
           <RankingCard colaboradores={colaboradores} />
         </div>
       </main>
