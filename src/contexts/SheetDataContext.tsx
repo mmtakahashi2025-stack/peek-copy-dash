@@ -31,6 +31,7 @@ export interface KpiData {
   previousValue?: string;
   variation: number;
   isPositive: boolean;
+  notFound?: boolean;
 }
 
 export interface ColaboradorData {
@@ -174,17 +175,27 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   // Get unique colaboradores (Emissor)
   const colaboradores = Array.from(new Set(rawData.map(r => r.Emissor))).filter(Boolean);
 
-  // Calculate KPIs
+  // Calculate KPIs - maintaining the original 8 KPIs
   const getKpis = useCallback((filialId: string): KpiData[] => {
     const filteredData = filialId === 'todas' 
       ? rawData 
       : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
 
     if (filteredData.length === 0) {
-      return [];
+      // Return all 8 KPIs with notFound state
+      return [
+        { id: 'padrao-exc', title: 'Padrão Exc. %', value: '--', meta: '90%', variation: 0, isPositive: true, notFound: true },
+        { id: 'leads', title: 'Leads', value: '--', variation: 0, isPositive: true, notFound: true },
+        { id: 'vendas', title: 'Vendas', value: '--', variation: 0, isPositive: true, notFound: true },
+        { id: 'conversao', title: 'Conversão', value: '--', variation: 0, isPositive: true, notFound: true },
+        { id: 'faturamento', title: 'Faturamento', value: '--', variation: 0, isPositive: true, notFound: true },
+        { id: 'ticket-medio', title: 'Ticket Médio', value: '--', variation: 0, isPositive: true, notFound: true },
+        { id: 'pa', title: 'P.A', value: '--', variation: 0, isPositive: true, notFound: true },
+        { id: 'lucro', title: 'Lucro %', value: '--', variation: 0, isPositive: true, notFound: true },
+      ];
     }
 
-    // Aggregate data
+    // Aggregate data from spreadsheet
     const vendaIds = new Set(filteredData.map(r => r['Venda #']));
     const totalVendas = vendaIds.size;
     const totalFaturamento = filteredData.reduce((sum, r) => sum + (r.Líquido || 0), 0);
@@ -194,62 +205,77 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     const lucroPercent = totalFaturamento > 0 ? (totalLucro / totalFaturamento) * 100 : 0;
     const pa = totalVendas > 0 ? totalQuantidade / totalVendas : 0;
 
+    // Return the 8 original KPIs - mark as notFound if data is not available in spreadsheet
     return [
+      {
+        id: 'padrao-exc',
+        title: 'Padrão Exc. %',
+        value: '--',
+        meta: '90%',
+        variation: 0,
+        isPositive: true,
+        notFound: true, // Not available in spreadsheet
+      },
+      {
+        id: 'leads',
+        title: 'Leads',
+        value: '--',
+        variation: 0,
+        isPositive: true,
+        notFound: true, // Not available in spreadsheet
+      },
       {
         id: 'vendas',
         title: 'Vendas',
         value: formatNumber(totalVendas),
+        previousValue: undefined,
         variation: 0,
         isPositive: true,
+        notFound: false,
+      },
+      {
+        id: 'conversao',
+        title: 'Conversão',
+        value: '--',
+        variation: 0,
+        isPositive: true,
+        notFound: true, // Needs leads to calculate
       },
       {
         id: 'faturamento',
         title: 'Faturamento',
         value: formatCurrency(totalFaturamento),
+        previousValue: undefined,
         variation: 0,
         isPositive: true,
-      },
-      {
-        id: 'lucro',
-        title: 'Lucro',
-        value: formatCurrency(totalLucro),
-        variation: 0,
-        isPositive: true,
-      },
-      {
-        id: 'lucro-percent',
-        title: 'Lucro %',
-        value: `${lucroPercent.toFixed(1)}%`,
-        variation: 0,
-        isPositive: lucroPercent > 0,
+        notFound: false,
       },
       {
         id: 'ticket-medio',
         title: 'Ticket Médio',
-        value: `R$ ${ticketMedio.toFixed(2)}`,
+        value: `R$ ${ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        previousValue: undefined,
         variation: 0,
         isPositive: true,
+        notFound: false,
       },
       {
         id: 'pa',
         title: 'P.A',
         value: pa.toFixed(1),
+        previousValue: undefined,
         variation: 0,
         isPositive: true,
+        notFound: false,
       },
       {
-        id: 'itens',
-        title: 'Itens Vendidos',
-        value: formatNumber(totalQuantidade),
+        id: 'lucro',
+        title: 'Lucro %',
+        value: `${lucroPercent.toFixed(1)}%`,
+        previousValue: undefined,
         variation: 0,
-        isPositive: true,
-      },
-      {
-        id: 'custo',
-        title: 'Custo Total',
-        value: formatCurrency(filteredData.reduce((sum, r) => sum + (r.Custo || 0), 0)),
-        variation: 0,
-        isPositive: true,
+        isPositive: lucroPercent > 0,
+        notFound: false,
       },
     ];
   }, [rawData]);
