@@ -432,38 +432,31 @@ export default function Leads() {
                                 <TableCell
                                   key={dateStr}
                                   className={cn(
-                                    'text-center p-0 h-12',
+                                    'text-center p-1 h-12',
                                     value >= 15 && 'bg-green-500/20',
                                     value >= 10 && value < 15 && 'bg-yellow-500/20',
                                     value > 0 && value < 10 && 'bg-orange-500/20'
                                   )}
                                 >
-                                  <div className="flex flex-col items-center justify-center h-full group relative">
-                                    <button
-                                      className="w-full h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted/50"
-                                      onClick={() => handleIncrement(row.collaborator as string, dateStr, value)}
-                                      disabled={isSaving}
-                                    >
-                                      <ChevronUp className="h-3 w-3" />
-                                    </button>
-                                    <span className={cn(
-                                      'text-sm',
-                                      value > 0 && 'font-medium',
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="999"
+                                    value={value || ''}
+                                    onChange={(e) => {
+                                      const newValue = Math.max(0, parseInt(e.target.value) || 0);
+                                      saveRecord(row.collaborator as string, dateStr, newValue);
+                                    }}
+                                    disabled={isSaving}
+                                    className={cn(
+                                      'w-full h-8 text-center text-sm font-medium bg-transparent border border-border/50 rounded focus:outline-none focus:ring-1 focus:ring-primary',
                                       value >= 15 && 'text-green-700 dark:text-green-400',
                                       value >= 10 && value < 15 && 'text-yellow-700 dark:text-yellow-400',
                                       value > 0 && value < 10 && 'text-orange-700 dark:text-orange-400',
                                       isSaving && 'opacity-50'
-                                    )}>
-                                      {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : (value > 0 ? value : '-')}
-                                    </span>
-                                    <button
-                                      className="w-full h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted/50"
-                                      onClick={() => handleDecrement(row.collaborator as string, dateStr, value)}
-                                      disabled={isSaving || value === 0}
-                                    >
-                                      <ChevronDown className="h-3 w-3" />
-                                    </button>
-                                  </div>
+                                    )}
+                                    placeholder="-"
+                                  />
                                 </TableCell>
                               );
                             })}
