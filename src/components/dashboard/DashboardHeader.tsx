@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { LogOut } from 'lucide-react';
+import { LogOut, Target } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import comboLogo from '@/assets/combo-iguassu-logo.png';
 import { SheetConfigDialog } from './SheetConfigDialog';
 
@@ -19,6 +20,12 @@ export function DashboardHeader() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
+          <Button variant="ghost" size="sm" asChild className="gap-2">
+            <Link to="/metas">
+              <Target className="h-4 w-4" />
+              <span className="hidden sm:inline">Metas</span>
+            </Link>
+          </Button>
           <SheetConfigDialog />
           <span className="text-sm text-muted-foreground hidden md:block">
             {user?.email}
