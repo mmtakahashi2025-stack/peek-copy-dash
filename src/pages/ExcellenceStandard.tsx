@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO, isWithinInterval } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Plus, Trash2, Loader2, Save, Edit2, CalendarIcon, CheckCircle2, XCircle, MinusCircle, ClipboardCheck } from 'lucide-react';
+import { Plus, Trash2, Loader2, Save, Edit2, CalendarIcon, CheckCircle2, XCircle, MinusCircle, ClipboardCheck, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { SecondaryHeader } from '@/components/layout/SecondaryHeader';
@@ -368,6 +368,114 @@ export default function ExcellenceStandard() {
         [criteriaId]: score,
       },
     }));
+  };
+
+  const handlePrintEvaluation = (evaluation: Evaluation) => {
+    const scoresList = criteria.map((c) => {
+      const score = evaluation.scores[c.id];
+      const scoreLabel = score === 1 ? 'SIM' : score === 0 ? 'NÃO' : score === -1 ? 'N/A' : '-';
+      return `
+        <tr>
+          <td style="border: 1px solid #ddd; padding: 8px;">${c.code}</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${c.description}</td>
+          <td style="border: 1px solid #ddd; padding: 8px; text-align: center; font-weight: bold; color: ${score === 1 ? 'green' : score === 0 ? 'red' : '#666'};">
+            ${scoreLabel}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Avaliação - ${evaluation.collaborator_name}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+          h1 { color: #333; font-size: 24px; margin-bottom: 5px; }
+          h2 { color: #666; font-size: 16px; font-weight: normal; margin-top: 0; }
+          .header { border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 20px; }
+          .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+          .info-item { background: #f5f5f5; padding: 10px; border-radius: 4px; }
+          .info-label { font-size: 12px; color: #666; }
+          .info-value { font-size: 14px; font-weight: bold; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th { background: #333; color: white; padding: 10px; text-align: left; }
+          .result { margin-top: 20px; padding: 15px; background: ${(evaluation.percentage || 0) >= 85 ? '#d4edda' : '#f8d7da'}; border-radius: 4px; text-align: center; }
+          .result-label { font-size: 14px; color: #666; }
+          .result-value { font-size: 32px; font-weight: bold; color: ${(evaluation.percentage || 0) >= 85 ? '#155724' : '#721c24'}; }
+          .signature { margin-top: 40px; display: flex; justify-content: space-between; }
+          .signature-line { width: 45%; text-align: center; }
+          .signature-line hr { margin-bottom: 5px; }
+          .signature-line span { font-size: 12px; color: #666; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>Avaliação Padrão de Excelência</h1>
+          <h2>Combo Iguassu</h2>
+        </div>
+        
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="info-label">Colaborador</div>
+            <div class="info-value">${evaluation.collaborator_name}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Data da Avaliação</div>
+            <div class="info-value">${format(new Date(evaluation.evaluation_date), 'dd/MM/yyyy')}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Nº da Conversa</div>
+            <div class="info-value">${evaluation.conversation_number || '-'}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Avaliador</div>
+            <div class="info-value">${evaluation.evaluator_email || '-'}</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 60px;">Código</th>
+              <th>Critério</th>
+              <th style="width: 80px; text-align: center;">Resultado</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${scoresList}
+          </tbody>
+        </table>
+
+        <div class="result">
+          <div class="result-label">Resultado Final</div>
+          <div class="result-value">${(evaluation.percentage || 0).toFixed(1)}%</div>
+        </div>
+
+        <div class="signature">
+          <div class="signature-line">
+            <hr />
+            <span>Assinatura do Avaliador</span>
+          </div>
+          <div class="signature-line">
+            <hr />
+            <span>Assinatura do Colaborador</span>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.onload = () => {
+        printWindow.print();
+      };
+    }
   };
 
   // Grid data
@@ -933,13 +1041,24 @@ export default function ExcellenceStandard() {
                             </span>
                           </TableCell>
                           <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDeleteEvaluation(evaluation.id)}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handlePrintEvaluation(evaluation)}
+                                title="Imprimir"
+                              >
+                                <Printer className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeleteEvaluation(evaluation.id)}
+                                title="Excluir"
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
