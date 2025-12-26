@@ -139,10 +139,10 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     fetchTargets();
   }, []);
 
-  // Load saved data on mount
+  // Load saved data on mount - using sessionStorage for security (clears on tab close)
   useEffect(() => {
-    const savedUrl = localStorage.getItem(SHEET_URL_KEY);
-    const savedData = localStorage.getItem(SHEET_DATA_KEY);
+    const savedUrl = sessionStorage.getItem(SHEET_URL_KEY);
+    const savedData = sessionStorage.getItem(SHEET_DATA_KEY);
     
     if (savedUrl) {
       setSheetUrl(savedUrl);
@@ -157,6 +157,31 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Validate broadcast data structure to prevent data corruption attacks
+  const isValidBroadcastData = (data: unknown): data is RawSaleRow[] => {
+    if (!Array.isArray(data) || data.length === 0 || data.length > 10000) {
+      return false;
+    }
+    // Validate all rows have expected structure
+    return data.every(row => 
+      typeof row === 'object' && 
+      row !== null &&
+      'Filial' in row &&
+      'Emissor' in row
+    );
+  };
+
+  // Validate URL is a Google Sheets URL
+  const isValidSheetUrl = (url: string): boolean => {
+    try {
+      const parsedUrl = new URL(url);
+      return parsedUrl.hostname === 'docs.google.com' && 
+             parsedUrl.pathname.includes('/spreadsheets/');
+    } catch {
+      return false;
+    }
+  };
+
   // Subscribe to realtime updates from other users
   useEffect(() => {
     const channel = supabase
@@ -165,13 +190,23 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         console.log('Received sheet update from another user');
         const { data, url } = payload.payload as { data: RawSaleRow[]; url: string };
         
-        if (data && Array.isArray(data)) {
-          setRawData(data);
-          setSheetUrl(url);
-          localStorage.setItem(SHEET_URL_KEY, url);
-          localStorage.setItem(SHEET_DATA_KEY, JSON.stringify(data));
-          toast.info('Dados atualizados por outro usuário');
+        // Validate data structure to prevent data corruption attacks
+        if (!isValidBroadcastData(data)) {
+          console.error('Invalid broadcast data received - rejecting');
+          return;
         }
+
+        // Validate URL to prevent malicious URLs
+        if (!isValidSheetUrl(url)) {
+          console.error('Invalid sheet URL in broadcast - rejecting');
+          return;
+        }
+        
+        setRawData(data);
+        setSheetUrl(url);
+        sessionStorage.setItem(SHEET_URL_KEY, url);
+        sessionStorage.setItem(SHEET_DATA_KEY, JSON.stringify(data));
+        toast.info('Dados atualizados por outro usuário');
       })
       .subscribe();
 
@@ -210,9 +245,9 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       setRawData(data);
       setSheetUrl(url);
       
-      // Save to localStorage
-      localStorage.setItem(SHEET_URL_KEY, url);
-      localStorage.setItem(SHEET_DATA_KEY, JSON.stringify(data));
+      // Save to sessionStorage (more secure - clears on tab close)
+      sessionStorage.setItem(SHEET_URL_KEY, url);
+      sessionStorage.setItem(SHEET_DATA_KEY, JSON.stringify(data));
       
       // Broadcast to other users
       if (broadcast) {
