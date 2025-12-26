@@ -12,13 +12,19 @@ interface KPICardProps {
   variation: number;
   isPositive: boolean;
   notFound?: boolean;
+  source?: 'sheet' | 'database';
 }
 
-export function KPICard({ title, value, rawValue, meta, targetValue, previousValue, variation, isPositive, notFound }: KPICardProps) {
+export function KPICard({ title, value, rawValue, meta, targetValue, previousValue, variation, isPositive, notFound, source = 'sheet' }: KPICardProps) {
   // Calculate variance from target (how far above/below)
   const hasTarget = targetValue !== undefined && targetValue > 0 && rawValue !== undefined;
   const meetsTarget = hasTarget && rawValue >= targetValue;
   const targetVariance = hasTarget ? (((rawValue - targetValue) / targetValue) * 100) : undefined;
+
+  // Message based on data source
+  const notFoundMessage = source === 'database' 
+    ? 'Dado não encontrado no banco de dados' 
+    : 'Dado não encontrado na planilha';
 
   if (notFound) {
     return (
@@ -35,7 +41,7 @@ export function KPICard({ title, value, rawValue, meta, targetValue, previousVal
           <div className="space-y-1">
             <p className="text-2xl font-bold tracking-tight text-muted-foreground">--</p>
             <p className="text-xs text-amber-600">
-              Dado não encontrado na planilha
+              {notFoundMessage}
             </p>
           </div>
         </CardContent>
