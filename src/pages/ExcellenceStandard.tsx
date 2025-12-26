@@ -45,6 +45,7 @@ interface Evaluation {
   collaborator_name: string;
   conversation_number: string | null;
   evaluation_date: string;
+  evaluator_email: string | null;
   created_at: string;
   scores: Record<string, number>;
   percentage?: number;
@@ -304,6 +305,7 @@ export default function ExcellenceStandard() {
             collaborator_name: collaborator,
             conversation_number: quickForm.conversation_number || null,
             evaluation_date: dateStr,
+            evaluator_email: user?.email || null,
           })
           .select()
           .single();
@@ -433,6 +435,72 @@ export default function ExcellenceStandard() {
     return { totalEvaluations, avgPercentage, aboveTarget, belowTarget };
   }, [evaluations, gridMonth]);
 
+  // Collaborator Ranking
+  const collaboratorRanking = useMemo(() => {
+    const monthStart = startOfMonth(gridMonth);
+    const monthEnd = endOfMonth(gridMonth);
+    
+    const monthEvaluations = evaluations.filter((e) => {
+      const date = parseISO(e.evaluation_date);
+      return isWithinInterval(date, { start: monthStart, end: monthEnd });
+    });
+
+    const collaboratorStats = monthEvaluations.reduce((acc, e) => {
+      if (!acc[e.collaborator_name]) {
+        acc[e.collaborator_name] = { total: 0, sum: 0 };
+      }
+      acc[e.collaborator_name].total += 1;
+      acc[e.collaborator_name].sum += e.percentage || 0;
+      return acc;
+    }, {} as Record<string, { total: number; sum: number }>);
+
+    return Object.entries(collaboratorStats)
+      .map(([name, stats]) => ({
+        name,
+        avgPercentage: stats.sum / stats.total,
+        total: stats.total,
+      }))
+      .sort((a, b) => b.avgPercentage - a.avgPercentage)
+      .slice(0, 10);
+  }, [evaluations, gridMonth]);
+
+  // Worst Criteria Ranking
+  const worstCriteriaRanking = useMemo(() => {
+    const monthStart = startOfMonth(gridMonth);
+    const monthEnd = endOfMonth(gridMonth);
+    
+    const monthEvaluations = evaluations.filter((e) => {
+      const date = parseISO(e.evaluation_date);
+      return isWithinInterval(date, { start: monthStart, end: monthEnd });
+    });
+
+    const criteriaStats = criteria.reduce((acc, c) => {
+      acc[c.id] = { code: c.code, description: c.description, positive: 0, total: 0 };
+      return acc;
+    }, {} as Record<string, { code: string; description: string; positive: number; total: number }>);
+
+    monthEvaluations.forEach((e) => {
+      Object.entries(e.scores).forEach(([criteriaId, score]) => {
+        if (criteriaStats[criteriaId] && score !== -1) {
+          criteriaStats[criteriaId].total += 1;
+          if (score === 1) criteriaStats[criteriaId].positive += 1;
+        }
+      });
+    });
+
+    return Object.entries(criteriaStats)
+      .filter(([_, stats]) => stats.total > 0)
+      .map(([id, stats]) => ({
+        id,
+        code: stats.code,
+        description: stats.description,
+        percentage: (stats.positive / stats.total) * 100,
+        total: stats.total,
+      }))
+      .sort((a, b) => a.percentage - b.percentage)
+      .slice(0, 5);
+  }, [evaluations, criteria, gridMonth]);
+
   // Year options
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -495,6 +563,74 @@ export default function ExcellenceStandard() {
               <Card className="p-4">
                 <p className="text-xs text-muted-foreground mb-1">Abaixo de 85%</p>
                 <p className="text-2xl font-bold text-destructive">{kpis.belowTarget}</p>
+              </Card>
+            </div>
+
+            {/* Rankings */}
+            <div className="grid md:grid-cols-2 gap-4">
+              {/* Collaborator Ranking */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Ranking de Colaboradores</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {collaboratorRanking.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">Sem dados no período</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {collaboratorRanking.map((collab, index) => (
+                        <div key={collab.name} className="flex items-center gap-3">
+                          <span className={cn(
+                            "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold",
+                            index === 0 ? "bg-yellow-500 text-yellow-950" :
+                            index === 1 ? "bg-gray-400 text-gray-950" :
+                            index === 2 ? "bg-orange-400 text-orange-950" :
+                            "bg-muted text-muted-foreground"
+                          )}>
+                            {index + 1}
+                          </span>
+                          <span className="flex-1 text-sm truncate">{collab.name}</span>
+                          <span className={cn(
+                            "text-sm font-medium",
+                            collab.avgPercentage >= 85 ? "text-success" : "text-destructive"
+                          )}>
+                            {collab.avgPercentage.toFixed(0)}%
+                          </span>
+                          <span className="text-xs text-muted-foreground">({collab.total})</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Worst Criteria Ranking */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Critérios Mais Mal Avaliados</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {worstCriteriaRanking.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">Sem dados no período</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {worstCriteriaRanking.map((criterion, index) => (
+                        <div key={criterion.id} className="flex items-center gap-3">
+                          <span className="w-6 h-6 rounded-full bg-destructive/10 text-destructive flex items-center justify-center text-xs font-bold">
+                            {index + 1}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{criterion.code}</p>
+                            <p className="text-xs text-muted-foreground truncate">{criterion.description}</p>
+                          </div>
+                          <span className="text-sm font-medium text-destructive">
+                            {criterion.percentage.toFixed(0)}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
               </Card>
             </div>
 
@@ -764,6 +900,7 @@ export default function ExcellenceStandard() {
                         <TableHead>Colaborador</TableHead>
                         <TableHead>Nº Conversa</TableHead>
                         <TableHead>Data</TableHead>
+                        <TableHead>Avaliador</TableHead>
                         <TableHead>Resultado</TableHead>
                         <TableHead className="w-20">Ações</TableHead>
                       </TableRow>
@@ -779,6 +916,9 @@ export default function ExcellenceStandard() {
                           </TableCell>
                           <TableCell>
                             {format(new Date(evaluation.evaluation_date), 'dd/MM/yyyy')}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {evaluation.evaluator_email || '-'}
                           </TableCell>
                           <TableCell>
                             <span
