@@ -50,6 +50,7 @@ export type Database = {
           conversation_number: string | null
           created_at: string
           evaluation_date: string
+          evaluator_email: string | null
           id: string
           updated_at: string
         }
@@ -58,6 +59,7 @@ export type Database = {
           conversation_number?: string | null
           created_at?: string
           evaluation_date: string
+          evaluator_email?: string | null
           id?: string
           updated_at?: string
         }
@@ -66,6 +68,7 @@ export type Database = {
           conversation_number?: string | null
           created_at?: string
           evaluation_date?: string
+          evaluator_email?: string | null
           id?: string
           updated_at?: string
         }
