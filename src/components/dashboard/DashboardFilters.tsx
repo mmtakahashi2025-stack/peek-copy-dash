@@ -132,10 +132,16 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
             <Calendar
               mode="range"
               selected={dateRange}
-              onSelect={setDateRange}
+              onSelect={(range) => {
+                // When only one day is clicked, set both from and to to the same date
+                if (range?.from && !range?.to) {
+                  setDateRange({ from: range.from, to: range.from });
+                } else {
+                  setDateRange(range);
+                }
+              }}
               locale={ptBR}
               numberOfMonths={2}
-              initialFocus
               className="p-3 pointer-events-auto"
             />
           </div>
@@ -180,10 +186,16 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
               <Calendar
                 mode="range"
                 selected={compareDateRange}
-                onSelect={setCompareDateRange}
+                onSelect={(range) => {
+                  // When only one day is clicked, set both from and to to the same date
+                  if (range?.from && !range?.to) {
+                    setCompareDateRange({ from: range.from, to: range.from });
+                  } else {
+                    setCompareDateRange(range);
+                  }
+                }}
                 locale={ptBR}
                 numberOfMonths={2}
-                initialFocus
                 className="p-3 pointer-events-auto"
               />
             </PopoverContent>
