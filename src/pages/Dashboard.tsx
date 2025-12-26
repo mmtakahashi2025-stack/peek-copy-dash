@@ -1,12 +1,13 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { RankingCard } from '@/components/dashboard/RankingCard';
 import { ProductRankingCard } from '@/components/dashboard/ProductRankingCard';
 import { SalesEvolutionChart } from '@/components/dashboard/SalesEvolutionChart';
-import { useSheetData } from '@/contexts/SheetDataContext';
+import { useSheetData, KpiData } from '@/contexts/SheetDataContext';
 import { FileSpreadsheet } from 'lucide-react';
+
 interface Filters {
   dateFrom: Date | undefined;
   dateTo: Date | undefined;
@@ -18,24 +19,56 @@ interface Filters {
 }
 
 export default function Dashboard() {
-  const { rawData, getKpis, getColaboradores, getProdutos, sheetUrl } = useSheetData();
+  const { rawData, getKpis, getColaboradores, getProdutos, fetchExcellencePercentage } = useSheetData();
   
   const [filters, setFilters] = useState<Filters>({
-    dateFrom: new Date(2024, 11, 1),
-    dateTo: new Date(2024, 11, 31),
+    dateFrom: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    dateTo: new Date(),
     filial: 'todas',
     colaborador: 'todos',
     compareEnabled: false,
-    compareDateFrom: new Date(2024, 10, 1),
-    compareDateTo: new Date(2024, 10, 30),
+    compareDateFrom: new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1),
+    compareDateTo: new Date(new Date().getFullYear(), new Date().getMonth(), 0),
   });
+
+  const [kpis, setKpis] = useState<KpiData[]>([]);
 
   const handleFiltersChange = useCallback((newFilters: Filters) => {
     setFilters(newFilters);
   }, []);
 
-  // Obter dados filtrados
-  const kpis = getKpis(filters.filial);
+  // Fetch KPIs when filters change
+  useEffect(() => {
+    const fetchKpis = async () => {
+      // Get base KPIs from sheet data
+      const baseKpis = getKpis(filters.filial, { dateFrom: filters.dateFrom, dateTo: filters.dateTo });
+      
+      // Fetch excellence percentage for the selected date range
+      const excellencePercentage = await fetchExcellencePercentage({ 
+        dateFrom: filters.dateFrom, 
+        dateTo: filters.dateTo 
+      });
+
+      // Update the Padrão Exc. KPI with the fetched value
+      const updatedKpis = baseKpis.map(kpi => {
+        if (kpi.id === 'padrao-exc') {
+          return {
+            ...kpi,
+            value: excellencePercentage !== null ? `${excellencePercentage.toFixed(1)}%` : '--',
+            rawValue: excellencePercentage ?? undefined,
+            isPositive: excellencePercentage !== null ? excellencePercentage >= 90 : true,
+            notFound: excellencePercentage === null,
+          };
+        }
+        return kpi;
+      });
+
+      setKpis(updatedKpis);
+    };
+
+    fetchKpis();
+  }, [filters.filial, filters.dateFrom, filters.dateTo, getKpis, fetchExcellencePercentage]);
+
   const colaboradores = getColaboradores(filters.filial, filters.colaborador);
   const produtos = getProdutos(filters.filial);
 

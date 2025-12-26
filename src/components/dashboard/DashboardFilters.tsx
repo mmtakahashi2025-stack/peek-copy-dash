@@ -43,12 +43,12 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
   const { filiais, getColaboradores } = useSheetData();
   
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: new Date(2024, 11, 1),
-    to: new Date(2024, 11, 31),
+    from: startOfMonth(new Date()),
+    to: new Date(),
   });
   const [compareDateRange, setCompareDateRange] = useState<DateRange | undefined>({
-    from: new Date(2024, 10, 1),
-    to: new Date(2024, 10, 30),
+    from: startOfMonth(subMonths(new Date(), 1)),
+    to: endOfMonth(subMonths(new Date(), 1)),
   });
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [filial, setFilial] = useState('todas');

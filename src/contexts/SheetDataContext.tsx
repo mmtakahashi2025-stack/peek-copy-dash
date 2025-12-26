@@ -71,6 +71,11 @@ export interface ProdutoData {
   quantidade: number;
 }
 
+export interface DateFilter {
+  dateFrom?: Date;
+  dateTo?: Date;
+}
+
 interface SheetDataContextType {
   rawData: RawSaleRow[];
   isLoading: boolean;
@@ -78,12 +83,13 @@ interface SheetDataContextType {
   sheetUrl: string | null;
   filiais: FilialData[];
   colaboradores: string[];
-  getKpis: (filialId: string) => KpiData[];
+  getKpis: (filialId: string, dateFilter?: DateFilter) => KpiData[];
   getColaboradores: (filialId: string, colaboradorId?: string) => ColaboradorData[];
   getEvolucao: () => EvolucaoData[];
   getProdutos: (filialId: string) => ProdutoData[];
   loadSheet: (url: string) => Promise<void>;
   refreshData: () => Promise<void>;
+  fetchExcellencePercentage: (dateFilter?: DateFilter) => Promise<number | null>;
 }
 
 const SheetDataContext = createContext<SheetDataContextType | undefined>(undefined);
@@ -140,48 +146,56 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     fetchTargets();
   }, []);
 
-  // Fetch excellence evaluations from database to calculate Padrão Exc. %
+  // Function to fetch excellence percentage for a specific date range
+  const fetchExcellencePercentage = useCallback(async (dateFilter?: DateFilter): Promise<number | null> => {
+    const now = new Date();
+    const startDate = dateFilter?.dateFrom 
+      ? dateFilter.dateFrom.toISOString().split('T')[0]
+      : new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const endDate = dateFilter?.dateTo 
+      ? dateFilter.dateTo.toISOString().split('T')[0]
+      : new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+    // Get evaluations for the date range
+    const { data: evaluations, error: evalError } = await supabase
+      .from('excellence_evaluations')
+      .select('id')
+      .gte('evaluation_date', startDate)
+      .lte('evaluation_date', endDate);
+
+    if (evalError || !evaluations || evaluations.length === 0) {
+      return null;
+    }
+
+    const evalIds = evaluations.map(e => e.id);
+
+    // Get scores for these evaluations
+    const { data: scores, error: scoresError } = await supabase
+      .from('excellence_scores')
+      .select('score')
+      .in('evaluation_id', evalIds);
+
+    if (scoresError || !scores) {
+      return null;
+    }
+
+    // Calculate percentage: valid scores (not -1), count positives (1)
+    const validScores = scores.filter(s => s.score !== null && s.score !== -1);
+    const positiveScores = validScores.filter(s => s.score === 1).length;
+    const percentage = validScores.length > 0 ? (positiveScores / validScores.length) * 100 : null;
+    
+    return percentage;
+  }, []);
+
+  // Fetch excellence evaluations from database to calculate Padrão Exc. % (for initial load)
   useEffect(() => {
     const fetchExcellenceData = async () => {
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
-
-      // Get evaluations for current month
-      const { data: evaluations, error: evalError } = await supabase
-        .from('excellence_evaluations')
-        .select('id')
-        .gte('evaluation_date', startOfMonth)
-        .lte('evaluation_date', endOfMonth);
-
-      if (evalError || !evaluations || evaluations.length === 0) {
-        setExcellencePercentage(null);
-        return;
-      }
-
-      const evalIds = evaluations.map(e => e.id);
-
-      // Get scores for these evaluations
-      const { data: scores, error: scoresError } = await supabase
-        .from('excellence_scores')
-        .select('score')
-        .in('evaluation_id', evalIds);
-
-      if (scoresError || !scores) {
-        setExcellencePercentage(null);
-        return;
-      }
-
-      // Calculate percentage: valid scores (not -1), count positives (1)
-      const validScores = scores.filter(s => s.score !== null && s.score !== -1);
-      const positiveScores = validScores.filter(s => s.score === 1).length;
-      const percentage = validScores.length > 0 ? (positiveScores / validScores.length) * 100 : null;
-      
+      const percentage = await fetchExcellencePercentage();
       setExcellencePercentage(percentage);
     };
 
     fetchExcellenceData();
-  }, []);
+  }, [fetchExcellencePercentage]);
 
   // Load saved data on mount - using sessionStorage for security (clears on tab close)
   useEffect(() => {
@@ -353,10 +367,47 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   const colaboradores = Array.from(new Set(rawData.map(r => r.Emissor))).filter(Boolean);
 
   // Calculate KPIs - maintaining the original 8 KPIs
-  const getKpis = useCallback((filialId: string): KpiData[] => {
-    const filteredData = filialId === 'todas' 
+  const getKpis = useCallback((filialId: string, dateFilter?: DateFilter): KpiData[] => {
+    // First filter by filial
+    let filteredData = filialId === 'todas' 
       ? rawData 
       : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
+
+    // Then filter by date if provided
+    // Note: The 'Data Venda' field might be a number (day of month) or a date string
+    // We'll need to handle this appropriately based on the actual data format
+    if (dateFilter?.dateFrom || dateFilter?.dateTo) {
+      filteredData = filteredData.filter(r => {
+        const dataVenda = r['Data Venda'];
+        if (!dataVenda) return true; // Include if no date
+        
+        // Try to parse the date - could be number (day) or string
+        let rowDate: Date | null = null;
+        
+        if (typeof dataVenda === 'number') {
+          // Assume it's a day of month - use current month as context
+          // This is a simplified approach; real implementation might need more context
+          const now = new Date();
+          rowDate = new Date(now.getFullYear(), now.getMonth(), dataVenda);
+        } else if (typeof dataVenda === 'string') {
+          // Try to parse string date (DD/MM/YYYY format common in Brazil)
+          const parts = dataVenda.split('/');
+          if (parts.length === 3) {
+            rowDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+          }
+        }
+        
+        if (!rowDate || isNaN(rowDate.getTime())) return true; // Include if we can't parse
+        
+        const fromDate = dateFilter.dateFrom;
+        const toDate = dateFilter.dateTo;
+        
+        if (fromDate && rowDate < fromDate) return false;
+        if (toDate && rowDate > toDate) return false;
+        
+        return true;
+      });
+    }
 
     // Helper to get target for a KPI type
     const getTarget = (kpiType: string): number | undefined => {
@@ -593,6 +644,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       getProdutos,
       loadSheet,
       refreshData,
+      fetchExcellencePercentage,
     }}>
       {children}
     </SheetDataContext.Provider>
