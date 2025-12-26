@@ -480,25 +480,19 @@ export default function Leads() {
                             const value = totalRecebido[dateStr] || 0;
 
                             return (
-                              <TableCell key={dateStr} className="text-center p-0 h-12">
-                                <div className="flex flex-col items-center justify-center h-full group relative">
-                                  <button
-                                    className="w-full h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted/50"
-                                    onClick={() => handleRecebidoIncrement(dateStr, value)}
-                                  >
-                                    <ChevronUp className="h-3 w-3" />
-                                  </button>
-                                  <span className="text-sm font-medium">
-                                    {value > 0 ? value : '-'}
-                                  </span>
-                                  <button
-                                    className="w-full h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted/50"
-                                    onClick={() => handleRecebidoDecrement(dateStr, value)}
-                                    disabled={value === 0}
-                                  >
-                                    <ChevronDown className="h-3 w-3" />
-                                  </button>
-                                </div>
+                              <TableCell key={dateStr} className="text-center p-1 h-12">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="9999"
+                                  value={value || ''}
+                                  onChange={(e) => {
+                                    const newValue = Math.max(0, parseInt(e.target.value) || 0);
+                                    setTotalRecebido(prev => ({ ...prev, [dateStr]: newValue }));
+                                  }}
+                                  className="w-full h-8 text-center text-sm font-medium bg-transparent border border-border/50 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                                  placeholder="-"
+                                />
                               </TableCell>
                             );
                           })}
