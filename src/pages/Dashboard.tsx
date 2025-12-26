@@ -79,7 +79,7 @@ export default function Dashboard() {
         
         {/* Chart and Ranking Side by Side */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <SalesEvolutionChart />
+          <SalesEvolutionChart filialId={filters.filial} />
           <RankingCard colaboradores={colaboradores} />
         </div>
       </main>
