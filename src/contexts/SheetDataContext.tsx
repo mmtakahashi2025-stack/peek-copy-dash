@@ -239,10 +239,28 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       });
 
       if (funcError) {
-        // Check for authentication errors
-        if (funcError.message?.includes('401') || funcError.message?.includes('Unauthorized') || funcError.message?.includes('non-2xx')) {
+        const ctx = (funcError as any)?.context;
+        const status = ctx?.status as number | undefined;
+        const body = ctx?.body as unknown;
+
+        let serverError: string | undefined;
+        if (body) {
+          try {
+            const parsed = typeof body === 'string' ? JSON.parse(body) : body;
+            serverError = (parsed as any)?.error;
+          } catch {
+            // ignore
+          }
+        }
+
+        if (status === 401) {
           throw new Error('Sessão expirada. Faça login novamente para carregar a planilha.');
         }
+
+        if (serverError) {
+          throw new Error(serverError);
+        }
+
         throw new Error(funcError.message || 'Erro ao buscar dados');
       }
 

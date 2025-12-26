@@ -47,6 +47,31 @@ function isValidGoogleSheetsUrl(url: string): boolean {
   }
 }
 
+// Extract spreadsheet id from common Google Sheets URL formats
+// Supports:
+// - https://docs.google.com/spreadsheets/d/<ID>/...
+// - https://docs.google.com/spreadsheets/d/e/<ID>/...
+function extractSpreadsheetId(sheetUrl: string): string | null {
+  try {
+    const parsedUrl = new URL(sheetUrl);
+    const parts = parsedUrl.pathname.split('/').filter(Boolean);
+
+    const dIndex = parts.indexOf('d');
+    if (dIndex === -1) return null;
+
+    const next = parts[dIndex + 1];
+    if (!next) return null;
+
+    if (next === 'e') {
+      return parts[dIndex + 2] ?? null;
+    }
+
+    return next;
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -115,17 +140,16 @@ Deno.serve(async (req) => {
       fetchUrl = sheetUrl;
       delimiter = '\t'; // Default pub format is often TSV
     } else if (sheetUrl.includes('docs.google.com/spreadsheets')) {
-      // Convert edit URL to export URL
-      const sheetIdMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
-      if (!sheetIdMatch) {
+      // Convert common Sheets URLs to export URL
+      const sheetId = extractSpreadsheetId(sheetUrl);
+      if (!sheetId) {
         return new Response(
-          JSON.stringify({ error: 'Formato de URL inválido. Use o link de compartilhamento da planilha.' }),
+          JSON.stringify({ error: 'Formato de URL inválido. Use o link de compartilhamento ou de publicação da planilha.' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      
-      const sheetId = sheetIdMatch[1];
-      const gidParam = sheetName ? `&gid=${sheetName}` : '';
+
+      const gidParam = sheetName ? `&gid=${encodeURIComponent(sheetName)}` : '';
       fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gidParam}`;
     }
 
