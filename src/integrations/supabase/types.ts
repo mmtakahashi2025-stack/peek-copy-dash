@@ -47,6 +47,7 @@ export type Database = {
       excellence_evaluations: {
         Row: {
           collaborator_name: string
+          conversation_number: string | null
           created_at: string
           evaluation_date: string
           id: string
@@ -54,6 +55,7 @@ export type Database = {
         }
         Insert: {
           collaborator_name: string
+          conversation_number?: string | null
           created_at?: string
           evaluation_date: string
           id?: string
@@ -61,6 +63,7 @@ export type Database = {
         }
         Update: {
           collaborator_name?: string
+          conversation_number?: string | null
           created_at?: string
           evaluation_date?: string
           id?: string
