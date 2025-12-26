@@ -91,6 +91,7 @@ interface SheetDataContextType {
   loadSheet: (url: string) => Promise<void>;
   refreshData: () => Promise<void>;
   fetchExcellencePercentage: (dateFilter?: DateFilter) => Promise<number | null>;
+  fetchLeadsTotal: (dateFilter?: DateFilter) => Promise<number | null>;
 }
 
 const SheetDataContext = createContext<SheetDataContextType | undefined>(undefined);
@@ -186,6 +187,30 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     const percentage = validScores.length > 0 ? (positiveScores / validScores.length) * 100 : null;
     
     return percentage;
+  }, []);
+
+  // Function to fetch leads total for a specific date range
+  const fetchLeadsTotal = useCallback(async (dateFilter?: DateFilter): Promise<number | null> => {
+    const now = new Date();
+    const startDate = dateFilter?.dateFrom 
+      ? dateFilter.dateFrom.toISOString().split('T')[0]
+      : new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const endDate = dateFilter?.dateTo 
+      ? dateFilter.dateTo.toISOString().split('T')[0]
+      : new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+      .from('lead_records')
+      .select('leads_count')
+      .gte('record_date', startDate)
+      .lte('record_date', endDate);
+
+    if (error || !data || data.length === 0) {
+      return null;
+    }
+
+    const total = data.reduce((sum, r) => sum + (r.leads_count || 0), 0);
+    return total;
   }, []);
 
   // Fetch excellence evaluations from database to calculate Padrão Exc. % (for initial load)
@@ -443,7 +468,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
           notFound: excellencePercentage === null,
           source: 'database' as const,
         },
-        { id: 'leads', title: 'Leads', value: '--', meta: formatTarget('leads', getTarget('leads')), targetValue: getTarget('leads'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
+        { id: 'leads', title: 'Leads', value: '--', meta: formatTarget('leads', getTarget('leads')), targetValue: getTarget('leads'), variation: 0, isPositive: true, notFound: true, source: 'database' as const },
         { id: 'vendas', title: 'Vendas', value: '--', meta: formatTarget('vendas', getTarget('vendas')), targetValue: getTarget('vendas'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
         { id: 'conversao', title: 'Conversão', value: '--', meta: formatTarget('conversao', getTarget('conversao')), targetValue: getTarget('conversao'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
         { id: 'faturamento', title: 'Faturamento', value: '--', meta: formatTarget('faturamento', getTarget('faturamento')), targetValue: getTarget('faturamento'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
@@ -486,7 +511,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         variation: 0,
         isPositive: true,
         notFound: true,
-        source: 'sheet' as const,
+        source: 'database' as const,
       },
       {
         id: 'vendas',
@@ -655,6 +680,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       loadSheet,
       refreshData,
       fetchExcellencePercentage,
+      fetchLeadsTotal,
     }}>
       {children}
     </SheetDataContext.Provider>
