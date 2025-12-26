@@ -11,7 +11,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { ArrowLeft, Save, Loader2, Copy, CalendarRange } from 'lucide-react';
 import { toast } from 'sonner';
+import { z } from 'zod';
 import comboLogo from '@/assets/combo-iguassu-logo.png';
+
+// Validation schema for KPI target values
+const kpiTargetSchema = z.number()
+  .min(0, 'Valor deve ser positivo')
+  .max(999999999, 'Valor muito grande')
+  .finite('Valor inválido');
 
 const KPI_TYPES = [
   { id: 'padrao_exc', label: 'Padrão Exc. %' },
@@ -93,6 +100,18 @@ export default function Targets() {
   };
 
   const handleSave = async (monthsToApply: number[] = [selectedMonth]) => {
+    // Validate all target values before saving
+    for (const kpi of KPI_TYPES) {
+      const value = targets[kpi.id];
+      if (value !== undefined && value !== null) {
+        const validationResult = kpiTargetSchema.safeParse(value);
+        if (!validationResult.success) {
+          toast.error(`${kpi.label}: ${validationResult.error.errors[0].message}`);
+          return;
+        }
+      }
+    }
+
     setSaving(true);
     try {
       for (const month of monthsToApply) {
@@ -155,8 +174,21 @@ export default function Targets() {
   };
 
   const handleTargetChange = (kpiId: string, value: string) => {
-    const numValue = parseFloat(value) || 0;
-    setTargets((prev) => ({ ...prev, [kpiId]: numValue }));
+    // Allow empty string for clearing the field
+    if (value === '') {
+      setTargets((prev) => {
+        const updated = { ...prev };
+        delete updated[kpiId];
+        return updated;
+      });
+      return;
+    }
+    
+    const numValue = parseFloat(value);
+    // Only update if it's a valid number
+    if (!isNaN(numValue)) {
+      setTargets((prev) => ({ ...prev, [kpiId]: numValue }));
+    }
   };
 
   const currentYear = new Date().getFullYear();

@@ -18,7 +18,29 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ArrowLeft, Plus, Trash2, Loader2, Save, Edit2, CalendarIcon, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { z } from 'zod';
 import comboLogo from '@/assets/combo-iguassu-logo.png';
+
+// Validation schemas
+const criterionSchema = z.object({
+  code: z.string()
+    .min(1, 'Código é obrigatório')
+    .max(20, 'Código deve ter no máximo 20 caracteres')
+    .regex(/^[A-Za-z0-9.\-_]+$/, 'Código deve conter apenas letras, números, pontos, hífens e underscores'),
+  description: z.string()
+    .min(3, 'Descrição deve ter pelo menos 3 caracteres')
+    .max(500, 'Descrição deve ter no máximo 500 caracteres'),
+});
+
+const evaluationSchema = z.object({
+  collaborator_name: z.string().min(1, 'Selecione um colaborador'),
+  conversation_number: z.string()
+    .max(50, 'Número da conversa muito longo')
+    .optional()
+    .or(z.literal('')),
+  evaluation_date: z.date()
+    .max(new Date(new Date().setHours(23, 59, 59, 999)), 'Data não pode ser no futuro'),
+});
 
 interface Criterion {
   id: string;
@@ -143,10 +165,18 @@ export default function ExcellenceStandard() {
 
   // Criteria functions
   const handleSaveCriterion = async () => {
-    if (!newCriterion.code.trim() || !newCriterion.description.trim()) {
-      toast.error('Preencha todos os campos');
+    // Validate input with zod
+    const validationResult = criterionSchema.safeParse({
+      code: newCriterion.code.trim(),
+      description: newCriterion.description.trim(),
+    });
+
+    if (!validationResult.success) {
+      toast.error(validationResult.error.errors[0].message);
       return;
     }
+
+    const validated = validationResult.data;
 
     setSaving(true);
     try {
@@ -154,8 +184,8 @@ export default function ExcellenceStandard() {
         const { error } = await supabase
           .from('excellence_criteria')
           .update({
-            code: newCriterion.code,
-            description: newCriterion.description,
+            code: validated.code,
+            description: validated.description,
           })
           .eq('id', editingCriterion.id);
 
@@ -167,8 +197,8 @@ export default function ExcellenceStandard() {
           : 0;
 
         const { error } = await supabase.from('excellence_criteria').insert({
-          code: newCriterion.code,
-          description: newCriterion.description,
+          code: validated.code,
+          description: validated.description,
           order_index: maxOrder + 1,
         });
 
@@ -214,10 +244,19 @@ export default function ExcellenceStandard() {
 
   // Evaluation functions
   const handleSaveEvaluation = async () => {
-    if (!evaluationForm.collaborator_name) {
-      toast.error('Selecione o colaborador');
+    // Validate input with zod
+    const validationResult = evaluationSchema.safeParse({
+      collaborator_name: evaluationForm.collaborator_name,
+      conversation_number: evaluationForm.conversation_number || '',
+      evaluation_date: evaluationForm.evaluation_date,
+    });
+
+    if (!validationResult.success) {
+      toast.error(validationResult.error.errors[0].message);
       return;
     }
+
+    const validated = validationResult.data;
 
     setSaving(true);
     try {
@@ -227,9 +266,9 @@ export default function ExcellenceStandard() {
         const { error } = await supabase
           .from('excellence_evaluations')
           .update({
-            collaborator_name: evaluationForm.collaborator_name,
-            conversation_number: evaluationForm.conversation_number || null,
-            evaluation_date: format(evaluationForm.evaluation_date, 'yyyy-MM-dd'),
+            collaborator_name: validated.collaborator_name,
+            conversation_number: validated.conversation_number || null,
+            evaluation_date: format(validated.evaluation_date, 'yyyy-MM-dd'),
           })
           .eq('id', editingEvaluation.id);
 
@@ -245,9 +284,9 @@ export default function ExcellenceStandard() {
         const { data, error } = await supabase
           .from('excellence_evaluations')
           .insert({
-            collaborator_name: evaluationForm.collaborator_name,
-            conversation_number: evaluationForm.conversation_number || null,
-            evaluation_date: format(evaluationForm.evaluation_date, 'yyyy-MM-dd'),
+            collaborator_name: validated.collaborator_name,
+            conversation_number: validated.conversation_number || null,
+            evaluation_date: format(validated.evaluation_date, 'yyyy-MM-dd'),
           })
           .select()
           .single();
