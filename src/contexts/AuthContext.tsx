@@ -52,6 +52,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    // Clear sensitive cached data before logout
+    sessionStorage.removeItem('dashboard_sheet_url');
+    sessionStorage.removeItem('dashboard_sheet_data');
+    // Also clear localStorage in case of legacy data
+    localStorage.removeItem('dashboard_sheet_url');
+    localStorage.removeItem('dashboard_sheet_data');
+    
     await supabase.auth.signOut();
   };
 

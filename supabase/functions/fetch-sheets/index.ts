@@ -134,11 +134,16 @@ Deno.serve(async (req) => {
     const response = await fetch(fetchUrl);
     
     if (!response.ok) {
-      console.error('Failed to fetch sheet:', response.status, response.statusText);
+      // Log full details server-side for debugging
+      console.error('Failed to fetch sheet:', {
+        status: response.status,
+        statusText: response.statusText,
+        url: fetchUrl
+      });
+      // Return generic message to client - no details exposed
       return new Response(
         JSON.stringify({ 
-          error: 'Não foi possível acessar a planilha. Verifique se ela está publicada na web.',
-          details: `Status: ${response.status}` 
+          error: 'Não foi possível acessar a planilha. Verifique se ela está publicada na web.'
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -167,10 +172,11 @@ Deno.serve(async (req) => {
     );
 
   } catch (error: unknown) {
+    // Log full error server-side for debugging
     console.error('Error fetching sheet:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    // Return generic message to client - no error details exposed
     return new Response(
-      JSON.stringify({ error: 'Erro ao processar a planilha', details: errorMessage }),
+      JSON.stringify({ error: 'Erro ao processar a planilha' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
