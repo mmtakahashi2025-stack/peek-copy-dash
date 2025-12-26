@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { LogOut, Target, Award, Users, Menu, Settings } from 'lucide-react';
+import { LogOut, Target, Award, Users, Menu, LayoutDashboard } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import comboLogo from '@/assets/combo-iguassu-logo.png';
 import { SheetConfigDialog } from './SheetConfigDialog';
@@ -9,9 +9,10 @@ import { useState } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
 
 const menuItems = [
+  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/metas', icon: Target, label: 'Metas' },
   { to: '/leads', icon: Users, label: 'Leads' },
-  { to: '/padrao-excelencia', icon: Award, label: 'Padrão de Excelência' },
+  { to: '/padrao-excelencia', icon: Award, label: 'Padrão' },
 ];
 
 export function DashboardHeader() {
@@ -34,15 +35,24 @@ export function DashboardHeader() {
         </div>
 
         {/* Desktop Menu */}
-        <div className="hidden md:flex items-center gap-4">
-          {menuItems.map((item) => (
-            <Button key={item.to} variant="ghost" size="sm" asChild className="gap-2">
-              <Link to={item.to}>
-                <item.icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            </Button>
-          ))}
+        <div className="hidden md:flex items-center gap-1">
+          {menuItems.map((item) => {
+            const isActive = location.pathname === item.to;
+            return (
+              <Button
+                key={item.to}
+                variant={isActive ? 'secondary' : 'ghost'}
+                size="sm"
+                asChild
+                className="gap-2"
+              >
+                <Link to={item.to}>
+                  <item.icon className="h-4 w-4" />
+                  {item.label}
+                </Link>
+              </Button>
+            );
+          })}
           <SheetConfigDialog />
           <span className="text-sm text-muted-foreground">
             {user?.email}

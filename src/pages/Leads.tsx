@@ -14,7 +14,7 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isWithinInterval, 
 import { ptBR } from 'date-fns/locale';
 import { Loader2, CalendarIcon, Users, ChevronUp, ChevronDown, TrendingDown, Minus, ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { toast } from 'sonner';
-import { SecondaryHeader } from '@/components/layout/SecondaryHeader';
+import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 
 interface LeadRecord {
   id: string;
@@ -331,7 +331,7 @@ export default function Leads() {
 
   return (
     <div className="min-h-screen bg-background">
-      <SecondaryHeader title="Controle de Leads" />
+      <DashboardHeader />
 
       <main className="container mx-auto p-4 md:p-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
