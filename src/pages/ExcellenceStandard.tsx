@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSheetData } from '@/contexts/SheetDataContext';
@@ -14,9 +14,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO, isWithinInterval } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Plus, Trash2, Loader2, Save, Edit2, CalendarIcon, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
+import { Plus, Trash2, Loader2, Save, Edit2, CalendarIcon, CheckCircle2, XCircle, MinusCircle, ClipboardCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { SecondaryHeader } from '@/components/layout/SecondaryHeader';
@@ -30,16 +30,6 @@ const criterionSchema = z.object({
   description: z.string()
     .min(3, 'Descrição deve ter pelo menos 3 caracteres')
     .max(500, 'Descrição deve ter no máximo 500 caracteres'),
-});
-
-const evaluationSchema = z.object({
-  collaborator_name: z.string().min(1, 'Selecione um colaborador'),
-  conversation_number: z.string()
-    .max(50, 'Número da conversa muito longo')
-    .optional()
-    .or(z.literal('')),
-  evaluation_date: z.date()
-    .max(new Date(new Date().setHours(23, 59, 59, 999)), 'Data não pode ser no futuro'),
 });
 
 interface Criterion {
@@ -60,11 +50,21 @@ interface Evaluation {
   percentage?: number;
 }
 
+// Month names in Portuguese
+const MONTHS = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
+
 export default function ExcellenceStandard() {
   const { user, loading: authLoading } = useAuth();
   const { colaboradores } = useSheetData();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('evaluations');
+  const [activeTab, setActiveTab] = useState('grid');
+  
+  // Month/Year filter
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   
   // Criteria state
   const [criteria, setCriteria] = useState<Criterion[]>([]);
@@ -76,15 +76,16 @@ export default function ExcellenceStandard() {
   // Evaluations state
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [loadingEvaluations, setLoadingEvaluations] = useState(false);
-  const [showEvaluationDialog, setShowEvaluationDialog] = useState(false);
-  const [evaluationForm, setEvaluationForm] = useState({
-    collaborator_name: '',
+  const [saving, setSaving] = useState(false);
+  
+  // Quick evaluation popover state
+  const [activePopover, setActivePopover] = useState<string | null>(null);
+  const [quickForm, setQuickForm] = useState({
     conversation_number: '',
-    evaluation_date: new Date(),
     scores: {} as Record<string, number>,
   });
-  const [editingEvaluation, setEditingEvaluation] = useState<Evaluation | null>(null);
-  const [saving, setSaving] = useState(false);
+
+  const gridMonth = useMemo(() => new Date(selectedYear, selectedMonth, 1), [selectedYear, selectedMonth]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -140,7 +141,6 @@ export default function ExcellenceStandard() {
           scoresMap[s.criteria_id] = s.score;
         });
 
-        // Calculate percentage
         const validScores = Object.values(scoresMap).filter((s) => s !== -1);
         const positiveScores = validScores.filter((s) => s === 1).length;
         const percentage = validScores.length > 0 
@@ -165,7 +165,6 @@ export default function ExcellenceStandard() {
 
   // Criteria functions
   const handleSaveCriterion = async () => {
-    // Validate input with zod
     const validationResult = criterionSchema.safeParse({
       code: newCriterion.code.trim(),
       description: newCriterion.description.trim(),
@@ -242,38 +241,55 @@ export default function ExcellenceStandard() {
     setShowCriterionDialog(true);
   };
 
-  // Evaluation functions
-  const handleSaveEvaluation = async () => {
-    // Validate input with zod
-    const validationResult = evaluationSchema.safeParse({
-      collaborator_name: evaluationForm.collaborator_name,
-      conversation_number: evaluationForm.conversation_number || '',
-      evaluation_date: evaluationForm.evaluation_date,
-    });
+  // Quick evaluation functions
+  const openQuickEvaluation = (collaborator: string, dateStr: string) => {
+    const key = `${collaborator}-${dateStr}`;
+    setActivePopover(key);
+    
+    // Check if there's an existing evaluation for this cell
+    const existing = evaluations.find(
+      e => e.collaborator_name === collaborator && e.evaluation_date === dateStr
+    );
+    
+    if (existing) {
+      setQuickForm({
+        conversation_number: existing.conversation_number || '',
+        scores: { ...existing.scores },
+      });
+    } else {
+      setQuickForm({
+        conversation_number: '',
+        scores: {},
+      });
+    }
+  };
 
-    if (!validationResult.success) {
-      toast.error(validationResult.error.errors[0].message);
+  const handleQuickSave = async (collaborator: string, dateStr: string) => {
+    if (criteria.length === 0) {
+      toast.error('Cadastre critérios antes de avaliar');
       return;
     }
 
-    const validated = validationResult.data;
-
     setSaving(true);
     try {
+      // Check if evaluation exists
+      const existing = evaluations.find(
+        e => e.collaborator_name === collaborator && e.evaluation_date === dateStr
+      );
+
       let evaluationId: string;
 
-      if (editingEvaluation) {
+      if (existing) {
+        // Update existing
         const { error } = await supabase
           .from('excellence_evaluations')
           .update({
-            collaborator_name: validated.collaborator_name,
-            conversation_number: validated.conversation_number || null,
-            evaluation_date: format(validated.evaluation_date, 'yyyy-MM-dd'),
+            conversation_number: quickForm.conversation_number || null,
           })
-          .eq('id', editingEvaluation.id);
+          .eq('id', existing.id);
 
         if (error) throw error;
-        evaluationId = editingEvaluation.id;
+        evaluationId = existing.id;
 
         // Delete existing scores
         await supabase
@@ -281,12 +297,13 @@ export default function ExcellenceStandard() {
           .delete()
           .eq('evaluation_id', evaluationId);
       } else {
+        // Create new
         const { data, error } = await supabase
           .from('excellence_evaluations')
           .insert({
-            collaborator_name: validated.collaborator_name,
-            conversation_number: validated.conversation_number || null,
-            evaluation_date: format(validated.evaluation_date, 'yyyy-MM-dd'),
+            collaborator_name: collaborator,
+            conversation_number: quickForm.conversation_number || null,
+            evaluation_date: dateStr,
           })
           .select()
           .single();
@@ -296,7 +313,7 @@ export default function ExcellenceStandard() {
       }
 
       // Insert scores
-      const scoresToInsert = Object.entries(evaluationForm.scores).map(
+      const scoresToInsert = Object.entries(quickForm.scores).map(
         ([criteriaId, score]) => ({
           evaluation_id: evaluationId,
           criteria_id: criteriaId,
@@ -312,15 +329,8 @@ export default function ExcellenceStandard() {
         if (error) throw error;
       }
 
-      toast.success(editingEvaluation ? 'Avaliação atualizada!' : 'Avaliação salva!');
-      setShowEvaluationDialog(false);
-      setEditingEvaluation(null);
-      setEvaluationForm({
-        collaborator_name: '',
-        conversation_number: '',
-        evaluation_date: new Date(),
-        scores: {},
-      });
+      toast.success('Avaliação salva!');
+      setActivePopover(null);
       loadEvaluations();
     } catch (error) {
       console.error('Error saving evaluation:', error);
@@ -348,36 +358,94 @@ export default function ExcellenceStandard() {
     }
   };
 
-  const openEditEvaluation = (evaluation: Evaluation) => {
-    setEditingEvaluation(evaluation);
-    setEvaluationForm({
-      collaborator_name: evaluation.collaborator_name,
-      conversation_number: evaluation.conversation_number || '',
-      evaluation_date: new Date(evaluation.evaluation_date),
-      scores: { ...evaluation.scores },
-    });
-    setShowEvaluationDialog(true);
-  };
-
-  const openNewEvaluation = () => {
-    setEditingEvaluation(null);
-    setEvaluationForm({
-      collaborator_name: '',
-      conversation_number: '',
-      evaluation_date: new Date(),
-      scores: {},
-    });
-    setShowEvaluationDialog(true);
-  };
-
-  const setScore = (criteriaId: string, score: number) => {
-    setEvaluationForm((prev) => ({
+  const setQuickScore = (criteriaId: string, score: number) => {
+    setQuickForm((prev) => ({
       ...prev,
       scores: {
         ...prev.scores,
         [criteriaId]: score,
       },
     }));
+  };
+
+  // Grid data
+  const gridData = useMemo(() => {
+    const monthStart = startOfMonth(gridMonth);
+    const monthEnd = endOfMonth(gridMonth);
+    const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
+
+    // Filter evaluations for the selected month
+    const monthEvaluations = evaluations.filter((e) => {
+      const date = parseISO(e.evaluation_date);
+      return isWithinInterval(date, { start: monthStart, end: monthEnd });
+    });
+
+    // Get unique collaborators
+    const collaboratorsInMonth = [...new Set(monthEvaluations.map((e) => e.collaborator_name))];
+    const allCollaborators = colaboradores.length > 0 
+      ? colaboradores 
+      : collaboratorsInMonth;
+    const uniqueCollaborators = [...new Set([...allCollaborators, ...collaboratorsInMonth])];
+
+    // Build grid data
+    const grid = uniqueCollaborators.map((collab) => {
+      const row: Record<string, any> = { collaborator: collab };
+      let totalEvaluations = 0;
+      let totalPercentage = 0;
+
+      daysInMonth.forEach((day) => {
+        const dateStr = format(day, 'yyyy-MM-dd');
+        const evaluation = monthEvaluations.find(
+          (e) => e.collaborator_name === collab && e.evaluation_date === dateStr
+        );
+        row[dateStr] = evaluation || null;
+        if (evaluation) {
+          totalEvaluations++;
+          totalPercentage += evaluation.percentage || 0;
+        }
+      });
+
+      row.total = totalEvaluations;
+      row.avgPercentage = totalEvaluations > 0 ? totalPercentage / totalEvaluations : 0;
+      return row;
+    });
+
+    return { grid, daysInMonth };
+  }, [evaluations, gridMonth, colaboradores]);
+
+  // KPIs
+  const kpis = useMemo(() => {
+    const monthStart = startOfMonth(gridMonth);
+    const monthEnd = endOfMonth(gridMonth);
+    
+    const monthEvaluations = evaluations.filter((e) => {
+      const date = parseISO(e.evaluation_date);
+      return isWithinInterval(date, { start: monthStart, end: monthEnd });
+    });
+
+    const totalEvaluations = monthEvaluations.length;
+    const avgPercentage = totalEvaluations > 0
+      ? monthEvaluations.reduce((sum, e) => sum + (e.percentage || 0), 0) / totalEvaluations
+      : 0;
+    const aboveTarget = monthEvaluations.filter((e) => (e.percentage || 0) >= 85).length;
+    const belowTarget = totalEvaluations - aboveTarget;
+
+    return { totalEvaluations, avgPercentage, aboveTarget, belowTarget };
+  }, [evaluations, gridMonth]);
+
+  // Year options
+  const yearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return [currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
+  }, []);
+
+  const getEvaluationIcon = (evaluation: Evaluation | null) => {
+    if (!evaluation) return null;
+    const pct = evaluation.percentage || 0;
+    if (pct >= 85) {
+      return <CheckCircle2 className="h-4 w-4 text-success" />;
+    }
+    return <XCircle className="h-4 w-4 text-destructive" />;
   };
 
   if (authLoading) {
@@ -395,9 +463,348 @@ export default function ExcellenceStandard() {
       <main className="container mx-auto p-4 md:p-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-4">
-            <TabsTrigger value="evaluations">Avaliações</TabsTrigger>
+            <TabsTrigger value="grid">Grade Mensal</TabsTrigger>
+            <TabsTrigger value="list">Lista de Avaliações</TabsTrigger>
             <TabsTrigger value="criteria">Critérios</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="grid" className="space-y-4">
+            {/* KPIs */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="p-4">
+                <p className="text-xs text-muted-foreground mb-1">Total Avaliações</p>
+                <p className="text-2xl font-bold">{kpis.totalEvaluations}</p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs text-muted-foreground mb-1">Média Geral</p>
+                <p className={cn(
+                  "text-2xl font-bold",
+                  kpis.avgPercentage >= 85 ? "text-success" : "text-destructive"
+                )}>
+                  {kpis.avgPercentage.toFixed(1)}%
+                </p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs text-muted-foreground mb-1">Acima de 85%</p>
+                <p className="text-2xl font-bold text-success">{kpis.aboveTarget}</p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs text-muted-foreground mb-1">Abaixo de 85%</p>
+                <p className="text-2xl font-bold text-destructive">{kpis.belowTarget}</p>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <CardTitle className="text-lg">Avaliações por Colaborador</CardTitle>
+                <div className="flex items-center gap-2">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="gap-2">
+                        <CalendarIcon className="h-4 w-4" />
+                        {MONTHS[selectedMonth]} {selectedYear}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-4 pointer-events-auto" align="end">
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Ano</label>
+                          <Select 
+                            value={selectedYear.toString()} 
+                            onValueChange={(v) => setSelectedYear(parseInt(v))}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {yearOptions.map((year) => (
+                                <SelectItem key={year} value={year.toString()}>
+                                  {year}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Mês</label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {MONTHS.map((month, index) => (
+                              <Button
+                                key={month}
+                                variant={selectedMonth === index ? 'default' : 'outline'}
+                                size="sm"
+                                className="text-xs"
+                                onClick={() => setSelectedMonth(index)}
+                              >
+                                {month.slice(0, 3)}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingEvaluations || loadingCriteria ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : criteria.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">
+                    Cadastre critérios na aba "Critérios" antes de criar avaliações.
+                  </p>
+                ) : gridData.grid.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">
+                    Nenhum colaborador encontrado. Carregue a planilha de vendas.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="sticky left-0 bg-card z-10 min-w-[150px]">Colaborador</TableHead>
+                          {gridData.daysInMonth.map((day) => (
+                            <TableHead key={day.toISOString()} className="text-center min-w-[40px] px-1">
+                              {format(day, 'd')}
+                            </TableHead>
+                          ))}
+                          <TableHead className="text-center min-w-[60px]">Total</TableHead>
+                          <TableHead className="text-center min-w-[60px]">Média</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {gridData.grid.map((row) => (
+                          <TableRow key={row.collaborator}>
+                            <TableCell className="sticky left-0 bg-card z-10 font-medium">
+                              {row.collaborator}
+                            </TableCell>
+                            {gridData.daysInMonth.map((day) => {
+                              const dateStr = format(day, 'yyyy-MM-dd');
+                              const evaluation = row[dateStr] as Evaluation | null;
+                              const cellKey = `${row.collaborator}-${dateStr}`;
+                              
+                              return (
+                                <TableCell key={dateStr} className="text-center p-0">
+                                  <Popover 
+                                    open={activePopover === cellKey} 
+                                    onOpenChange={(open) => {
+                                      if (open) {
+                                        openQuickEvaluation(row.collaborator, dateStr);
+                                      } else {
+                                        setActivePopover(null);
+                                      }
+                                    }}
+                                  >
+                                    <PopoverTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className={cn(
+                                          "h-8 w-8 p-0",
+                                          evaluation && (evaluation.percentage || 0) >= 85 && "bg-success/10",
+                                          evaluation && (evaluation.percentage || 0) < 85 && "bg-destructive/10"
+                                        )}
+                                      >
+                                        {evaluation ? (
+                                          getEvaluationIcon(evaluation)
+                                        ) : (
+                                          <Plus className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 hover:opacity-100" />
+                                        )}
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-80 p-4 pointer-events-auto" align="center">
+                                      <div className="space-y-3">
+                                        <div className="flex items-center justify-between">
+                                          <div>
+                                            <p className="font-medium text-sm">{row.collaborator}</p>
+                                            <p className="text-xs text-muted-foreground">
+                                              {format(day, "dd 'de' MMMM", { locale: ptBR })}
+                                            </p>
+                                          </div>
+                                          {evaluation && (
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className="h-6 w-6"
+                                              onClick={() => handleDeleteEvaluation(evaluation.id)}
+                                            >
+                                              <Trash2 className="h-3 w-3 text-destructive" />
+                                            </Button>
+                                          )}
+                                        </div>
+                                        
+                                        <div className="space-y-1">
+                                          <Label className="text-xs">Nº Conversa</Label>
+                                          <Input
+                                            placeholder="Ex: 12345"
+                                            value={quickForm.conversation_number}
+                                            onChange={(e) =>
+                                              setQuickForm((prev) => ({
+                                                ...prev,
+                                                conversation_number: e.target.value,
+                                              }))
+                                            }
+                                            className="h-8 text-sm"
+                                          />
+                                        </div>
+
+                                        <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                                          {criteria.map((criterion) => (
+                                            <div 
+                                              key={criterion.id} 
+                                              className="flex items-center justify-between gap-2 py-1 border-b last:border-0"
+                                            >
+                                              <span className="text-xs truncate flex-1" title={criterion.description}>
+                                                <span className="font-medium">{criterion.code}</span>
+                                                {' - '}
+                                                {criterion.description.length > 30 
+                                                  ? criterion.description.slice(0, 30) + '...' 
+                                                  : criterion.description}
+                                              </span>
+                                              <div className="flex gap-1">
+                                                <Button
+                                                  variant={quickForm.scores[criterion.id] === 1 ? 'default' : 'outline'}
+                                                  size="icon"
+                                                  className={cn(
+                                                    'h-6 w-6',
+                                                    quickForm.scores[criterion.id] === 1 && 'bg-success hover:bg-success/90'
+                                                  )}
+                                                  onClick={() => setQuickScore(criterion.id, 1)}
+                                                >
+                                                  <CheckCircle2 className="h-3 w-3" />
+                                                </Button>
+                                                <Button
+                                                  variant={quickForm.scores[criterion.id] === 0 ? 'default' : 'outline'}
+                                                  size="icon"
+                                                  className={cn(
+                                                    'h-6 w-6',
+                                                    quickForm.scores[criterion.id] === 0 && 'bg-destructive hover:bg-destructive/90'
+                                                  )}
+                                                  onClick={() => setQuickScore(criterion.id, 0)}
+                                                >
+                                                  <XCircle className="h-3 w-3" />
+                                                </Button>
+                                                <Button
+                                                  variant={quickForm.scores[criterion.id] === -1 ? 'default' : 'outline'}
+                                                  size="icon"
+                                                  className="h-6 w-6"
+                                                  onClick={() => setQuickScore(criterion.id, -1)}
+                                                >
+                                                  <MinusCircle className="h-3 w-3" />
+                                                </Button>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+
+                                        <Button 
+                                          onClick={() => handleQuickSave(row.collaborator, dateStr)}
+                                          disabled={saving}
+                                          className="w-full h-8"
+                                          size="sm"
+                                        >
+                                          {saving ? (
+                                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                          ) : (
+                                            <Save className="h-3 w-3 mr-1" />
+                                          )}
+                                          Salvar
+                                        </Button>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                </TableCell>
+                              );
+                            })}
+                            <TableCell className="text-center font-medium">
+                              {row.total}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className={cn(
+                                "font-medium",
+                                row.avgPercentage >= 85 ? "text-success" : row.total > 0 ? "text-destructive" : ""
+                              )}>
+                                {row.total > 0 ? `${row.avgPercentage.toFixed(0)}%` : '-'}
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="list">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Histórico de Avaliações</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingEvaluations ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : evaluations.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">
+                    Nenhuma avaliação cadastrada
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Colaborador</TableHead>
+                        <TableHead>Nº Conversa</TableHead>
+                        <TableHead>Data</TableHead>
+                        <TableHead>Resultado</TableHead>
+                        <TableHead className="w-20">Ações</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {evaluations.map((evaluation) => (
+                        <TableRow key={evaluation.id}>
+                          <TableCell className="font-medium">
+                            {evaluation.collaborator_name}
+                          </TableCell>
+                          <TableCell>
+                            {evaluation.conversation_number || '-'}
+                          </TableCell>
+                          <TableCell>
+                            {format(new Date(evaluation.evaluation_date), 'dd/MM/yyyy')}
+                          </TableCell>
+                          <TableCell>
+                            <span
+                              className={cn(
+                                'font-semibold',
+                                (evaluation.percentage || 0) >= 85
+                                  ? 'text-success'
+                                  : 'text-destructive'
+                              )}
+                            >
+                              {(evaluation.percentage || 0).toFixed(1)}%
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDeleteEvaluation(evaluation.id)}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           <TabsContent value="criteria">
             <Card>
@@ -506,254 +913,7 @@ export default function ExcellenceStandard() {
               </CardContent>
             </Card>
           </TabsContent>
-
-          <TabsContent value="evaluations">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-lg">Avaliações</CardTitle>
-                <Button size="sm" className="gap-2" onClick={openNewEvaluation}>
-                  <Plus className="h-4 w-4" />
-                  Nova Avaliação
-                </Button>
-              </CardHeader>
-              <CardContent>
-                {loadingEvaluations ? (
-                  <div className="flex justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                  </div>
-                ) : evaluations.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-8">
-                    Nenhuma avaliação cadastrada
-                  </p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Colaborador</TableHead>
-                        <TableHead>Nº Conversa</TableHead>
-                        <TableHead>Data</TableHead>
-                        <TableHead>Resultado</TableHead>
-                        <TableHead className="w-24">Ações</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {evaluations.map((evaluation) => (
-                        <TableRow key={evaluation.id}>
-                          <TableCell className="font-medium">
-                            {evaluation.collaborator_name}
-                          </TableCell>
-                          <TableCell>
-                            {evaluation.conversation_number || '-'}
-                          </TableCell>
-                          <TableCell>
-                            {format(new Date(evaluation.evaluation_date), 'dd/MM/yyyy')}
-                          </TableCell>
-                          <TableCell>
-                            <span
-                              className={cn(
-                                'font-semibold',
-                                (evaluation.percentage || 0) >= 85
-                                  ? 'text-success'
-                                  : 'text-destructive'
-                              )}
-                            >
-                              {(evaluation.percentage || 0).toFixed(1)}%
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => openEditEvaluation(evaluation)}
-                              >
-                                <Edit2 className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDeleteEvaluation(evaluation.id)}
-                              >
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
         </Tabs>
-
-        {/* Evaluation Dialog */}
-        <Dialog open={showEvaluationDialog} onOpenChange={setShowEvaluationDialog}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>
-                {editingEvaluation ? 'Editar Avaliação' : 'Nova Avaliação'}
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label>Colaborador</Label>
-                  <Select
-                    value={evaluationForm.collaborator_name}
-                    onValueChange={(value) =>
-                      setEvaluationForm((prev) => ({
-                        ...prev,
-                        collaborator_name: value,
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione o colaborador" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {colaboradores.length === 0 ? (
-                        <SelectItem value="none" disabled>
-                          Carregue a planilha primeiro
-                        </SelectItem>
-                      ) : (
-                        colaboradores.map((colaborador) => (
-                          <SelectItem key={colaborador} value={colaborador}>
-                            {colaborador}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Nº da Conversa</Label>
-                  <Input
-                    placeholder="Ex: 12345"
-                    value={evaluationForm.conversation_number}
-                    onChange={(e) =>
-                      setEvaluationForm((prev) => ({
-                        ...prev,
-                        conversation_number: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Data</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          'w-full justify-start text-left font-normal',
-                          !evaluationForm.evaluation_date && 'text-muted-foreground'
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {evaluationForm.evaluation_date
-                          ? format(evaluationForm.evaluation_date, 'dd/MM/yyyy')
-                          : 'Selecione'}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={evaluationForm.evaluation_date}
-                        onSelect={(date) =>
-                          date &&
-                          setEvaluationForm((prev) => ({
-                            ...prev,
-                            evaluation_date: date,
-                          }))
-                        }
-                        locale={ptBR}
-                        className="pointer-events-auto"
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-
-              {criteria.length === 0 ? (
-                <p className="text-center text-muted-foreground py-4">
-                  Cadastre critérios antes de criar avaliações
-                </p>
-              ) : (
-                <div className="border rounded-lg">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-16">Código</TableHead>
-                        <TableHead>Critério</TableHead>
-                        <TableHead className="w-32 text-center">Avaliação</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {criteria.map((criterion) => (
-                        <TableRow key={criterion.id}>
-                          <TableCell className="font-medium">{criterion.code}</TableCell>
-                          <TableCell className="text-sm">{criterion.description}</TableCell>
-                          <TableCell>
-                            <div className="flex justify-center gap-1">
-                              <Button
-                                variant={evaluationForm.scores[criterion.id] === 1 ? 'default' : 'outline'}
-                                size="icon"
-                                className={cn(
-                                  'h-8 w-8',
-                                  evaluationForm.scores[criterion.id] === 1 && 'bg-success hover:bg-success/90'
-                                )}
-                                onClick={() => setScore(criterion.id, 1)}
-                              >
-                                <CheckCircle2 className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant={evaluationForm.scores[criterion.id] === 0 ? 'default' : 'outline'}
-                                size="icon"
-                                className={cn(
-                                  'h-8 w-8',
-                                  evaluationForm.scores[criterion.id] === 0 && 'bg-destructive hover:bg-destructive/90'
-                                )}
-                                onClick={() => setScore(criterion.id, 0)}
-                              >
-                                <XCircle className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant={evaluationForm.scores[criterion.id] === -1 ? 'default' : 'outline'}
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => setScore(criterion.id, -1)}
-                              >
-                                <MinusCircle className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setShowEvaluationDialog(false)}
-              >
-                Cancelar
-              </Button>
-              <Button onClick={handleSaveEvaluation} disabled={saving || criteria.length === 0}>
-                {saving ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <Save className="h-4 w-4 mr-2" />
-                )}
-                Salvar
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </main>
     </div>
   );
