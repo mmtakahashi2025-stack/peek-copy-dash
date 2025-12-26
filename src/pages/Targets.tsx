@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ArrowLeft, Save, Loader2 } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ArrowLeft, Save, Loader2, Copy, CalendarRange } from 'lucide-react';
 import { toast } from 'sonner';
 import comboLogo from '@/assets/combo-iguassu-logo.png';
 
@@ -24,18 +25,18 @@ const KPI_TYPES = [
 ];
 
 const MONTHS = [
-  { value: 1, label: 'Janeiro' },
-  { value: 2, label: 'Fevereiro' },
-  { value: 3, label: 'Março' },
-  { value: 4, label: 'Abril' },
-  { value: 5, label: 'Maio' },
-  { value: 6, label: 'Junho' },
-  { value: 7, label: 'Julho' },
-  { value: 8, label: 'Agosto' },
-  { value: 9, label: 'Setembro' },
-  { value: 10, label: 'Outubro' },
-  { value: 11, label: 'Novembro' },
-  { value: 12, label: 'Dezembro' },
+  { value: 1, label: 'Janeiro', short: 'Jan' },
+  { value: 2, label: 'Fevereiro', short: 'Fev' },
+  { value: 3, label: 'Março', short: 'Mar' },
+  { value: 4, label: 'Abril', short: 'Abr' },
+  { value: 5, label: 'Maio', short: 'Mai' },
+  { value: 6, label: 'Junho', short: 'Jun' },
+  { value: 7, label: 'Julho', short: 'Jul' },
+  { value: 8, label: 'Agosto', short: 'Ago' },
+  { value: 9, label: 'Setembro', short: 'Set' },
+  { value: 10, label: 'Outubro', short: 'Out' },
+  { value: 11, label: 'Novembro', short: 'Nov' },
+  { value: 12, label: 'Dezembro', short: 'Dez' },
 ];
 
 interface KpiTarget {
@@ -54,6 +55,8 @@ export default function Targets() {
   const [targets, setTargets] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [applyToMonths, setApplyToMonths] = useState<number[]>([]);
+  const [showBulkApply, setShowBulkApply] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -89,34 +92,66 @@ export default function Targets() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (monthsToApply: number[] = [selectedMonth]) => {
     setSaving(true);
     try {
-      for (const kpi of KPI_TYPES) {
-        const value = targets[kpi.id];
-        if (value !== undefined && value !== null) {
-          const { error } = await supabase
-            .from('kpi_targets')
-            .upsert(
-              {
-                year: selectedYear,
-                month: selectedMonth,
-                kpi_type: kpi.id,
-                target_value: value,
-              },
-              { onConflict: 'year,month,kpi_type' }
-            );
+      for (const month of monthsToApply) {
+        for (const kpi of KPI_TYPES) {
+          const value = targets[kpi.id];
+          if (value !== undefined && value !== null) {
+            const { error } = await supabase
+              .from('kpi_targets')
+              .upsert(
+                {
+                  year: selectedYear,
+                  month: month,
+                  kpi_type: kpi.id,
+                  target_value: value,
+                },
+                { onConflict: 'year,month,kpi_type' }
+              );
 
-          if (error) throw error;
+            if (error) throw error;
+          }
         }
       }
-      toast.success('Metas salvas com sucesso!');
+      
+      if (monthsToApply.length === 1) {
+        toast.success('Metas salvas com sucesso!');
+      } else {
+        toast.success(`Metas aplicadas para ${monthsToApply.length} meses!`);
+      }
+      setShowBulkApply(false);
+      setApplyToMonths([]);
     } catch (error) {
       console.error('Error saving targets:', error);
       toast.error('Erro ao salvar metas');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleBulkApply = () => {
+    if (applyToMonths.length === 0) {
+      toast.error('Selecione pelo menos um mês');
+      return;
+    }
+    handleSave(applyToMonths);
+  };
+
+  const toggleMonth = (month: number) => {
+    setApplyToMonths((prev) =>
+      prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month]
+    );
+  };
+
+  const selectAllMonths = () => {
+    setApplyToMonths(MONTHS.map((m) => m.value));
+  };
+
+  const selectRemainingMonths = () => {
+    const remaining = MONTHS.filter((m) => m.value >= selectedMonth).map((m) => m.value);
+    setApplyToMonths(remaining);
   };
 
   const handleTargetChange = (kpiId: string, value: string) => {
@@ -224,8 +259,63 @@ export default function Targets() {
               </Table>
             )}
 
-            <div className="flex justify-end">
-              <Button onClick={handleSave} disabled={saving}>
+            <div className="flex flex-wrap gap-3 justify-between items-start border-t pt-4">
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowBulkApply(!showBulkApply)}
+                  className="gap-2"
+                >
+                  <CalendarRange className="h-4 w-4" />
+                  Aplicar para outros meses
+                </Button>
+
+                {showBulkApply && (
+                  <div className="mt-4 p-4 border rounded-lg bg-muted/30 space-y-3">
+                    <div className="flex gap-2 flex-wrap">
+                      <Button variant="ghost" size="sm" onClick={selectAllMonths}>
+                        Selecionar todos
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={selectRemainingMonths}>
+                        Mês atual em diante
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setApplyToMonths([])}>
+                        Limpar
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                      {MONTHS.map((month) => (
+                        <label
+                          key={month.value}
+                          className="flex items-center gap-2 cursor-pointer"
+                        >
+                          <Checkbox
+                            checked={applyToMonths.includes(month.value)}
+                            onCheckedChange={() => toggleMonth(month.value)}
+                          />
+                          <span className="text-sm">{month.short}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={handleBulkApply}
+                      disabled={saving || applyToMonths.length === 0}
+                      className="gap-2"
+                    >
+                      {saving ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                      Aplicar para {applyToMonths.length} mês(es)
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <Button onClick={() => handleSave()} disabled={saving}>
                 {saving ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
