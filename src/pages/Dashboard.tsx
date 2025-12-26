@@ -1,21 +1,46 @@
+import { useState, useCallback } from 'react';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { RankingCard } from '@/components/dashboard/RankingCard';
-import { kpisData, colaboradoresData } from '@/data/mockData';
+import { SalesEvolutionChart } from '@/components/dashboard/SalesEvolutionChart';
+import { ComparisonCard } from '@/components/dashboard/ComparisonCard';
+import { getFilteredKpis, getFilteredColaboradores } from '@/data/mockData';
+
+interface Filters {
+  dateFrom: Date | undefined;
+  dateTo: Date | undefined;
+  filial: string;
+  colaborador: string;
+}
 
 export default function Dashboard() {
+  const [filters, setFilters] = useState<Filters>({
+    dateFrom: new Date(2024, 0, 1),
+    dateTo: new Date(),
+    filial: 'todas',
+    colaborador: 'todos',
+  });
+
+  const handleFiltersChange = useCallback((newFilters: Filters) => {
+    setFilters(newFilters);
+  }, []);
+
+  // Obter dados filtrados
+  const kpis = getFilteredKpis(filters.filial);
+  const colaboradores = getFilteredColaboradores(filters.filial, filters.colaborador);
+
   return (
     <div className="min-h-screen bg-background">
       <DashboardHeader />
       
       <main className="container mx-auto px-4 py-6 space-y-6">
         {/* Filters */}
-        <DashboardFilters />
+        <DashboardFilters onFiltersChange={handleFiltersChange} />
         
         {/* KPI Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {kpisData.map((kpi) => (
+          {kpis.map((kpi) => (
             <KPICard
               key={kpi.id}
               title={kpi.title}
@@ -28,17 +53,15 @@ export default function Dashboard() {
           ))}
         </div>
         
-        {/* Ranking */}
+        {/* Charts and Comparison Row */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <RankingCard colaboradores={colaboradoresData} />
-          
-          {/* Placeholder for future chart */}
-          <div className="bg-card rounded-xl border p-6 flex items-center justify-center min-h-[400px]">
-            <div className="text-center text-muted-foreground">
-              <p className="text-lg font-medium">Gráfico de Evolução</p>
-              <p className="text-sm">Em breve</p>
-            </div>
-          </div>
+          <SalesEvolutionChart />
+          <ComparisonCard />
+        </div>
+        
+        {/* Ranking */}
+        <div className="grid grid-cols-1">
+          <RankingCard colaboradores={colaboradores} />
         </div>
       </main>
     </div>

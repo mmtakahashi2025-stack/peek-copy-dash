@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { LogOut, BarChart3 } from 'lucide-react';
+import { LogOut } from 'lucide-react';
+import comboLogo from '@/assets/combo-iguassu-logo.png';
 
 export function DashboardHeader() {
   const { user, signOut } = useAuth();
@@ -9,12 +10,10 @@ export function DashboardHeader() {
     <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-md border-b">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary">
-            <BarChart3 className="h-5 w-5 text-primary-foreground" />
-          </div>
+          <img src={comboLogo} alt="Combo Iguassu" className="h-10 w-10 rounded-lg object-contain" />
           <div>
-            <h1 className="text-lg font-bold">Profit Peeks</h1>
-            <p className="text-xs text-muted-foreground hidden sm:block">Dashboard de Vendas</p>
+            <h1 className="text-lg font-bold">Sales Ops</h1>
+            <p className="text-xs text-muted-foreground hidden sm:block">Combo Iguassu - Dashboard de Vendas</p>
           </div>
         </div>
 
