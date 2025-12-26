@@ -3,11 +3,13 @@ import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CalendarIcon } from 'lucide-react';
-import { format } from 'date-fns';
+import { Switch } from '@/components/ui/switch';
+import { CalendarIcon, ArrowLeftRight } from 'lucide-react';
+import { format, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { filiaisData, colaboradoresData } from '@/data/mockData';
+import { DateRange } from 'react-day-picker';
 
 interface DashboardFiltersProps {
   onFiltersChange?: (filters: {
@@ -15,12 +17,22 @@ interface DashboardFiltersProps {
     dateTo: Date | undefined;
     filial: string;
     colaborador: string;
+    compareEnabled: boolean;
+    compareDateFrom: Date | undefined;
+    compareDateTo: Date | undefined;
   }) => void;
 }
 
 export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
-  const [dateFrom, setDateFrom] = useState<Date | undefined>(new Date(2024, 0, 1));
-  const [dateTo, setDateTo] = useState<Date | undefined>(new Date());
+  const [dateRange, setDateRange] = useState<DateRange | undefined>({
+    from: new Date(2024, 11, 1),
+    to: new Date(2024, 11, 31),
+  });
+  const [compareDateRange, setCompareDateRange] = useState<DateRange | undefined>({
+    from: new Date(2024, 10, 1),
+    to: new Date(2024, 10, 30),
+  });
+  const [compareEnabled, setCompareEnabled] = useState(false);
   const [filial, setFilial] = useState('todas');
   const [colaborador, setColaborador] = useState('todos');
 
@@ -31,12 +43,15 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
 
   useEffect(() => {
     onFiltersChange?.({
-      dateFrom,
-      dateTo,
+      dateFrom: dateRange?.from,
+      dateTo: dateRange?.to,
       filial,
       colaborador,
+      compareEnabled,
+      compareDateFrom: compareDateRange?.from,
+      compareDateTo: compareDateRange?.to,
     });
-  }, [dateFrom, dateTo, filial, colaborador, onFiltersChange]);
+  }, [dateRange, filial, colaborador, compareEnabled, compareDateRange, onFiltersChange]);
 
   // Reset colaborador quando mudar filial
   useEffect(() => {
@@ -48,59 +63,80 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
     }
   }, [filial, colaborador, filteredColaboradores]);
 
+  const formatDateRange = (range: DateRange | undefined) => {
+    if (!range?.from) return 'Selecionar período';
+    if (!range.to) return format(range.from, 'dd/MM/yy', { locale: ptBR });
+    return `${format(range.from, 'dd/MM', { locale: ptBR })} - ${format(range.to, 'dd/MM/yy', { locale: ptBR })}`;
+  };
+
   return (
     <div className="flex flex-wrap items-center gap-3 p-4 bg-card rounded-xl shadow-sm border">
-      {/* Date From */}
+      {/* Date Range Picker */}
       <Popover>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
             className={cn(
-              'justify-start text-left font-normal min-w-[160px]',
-              !dateFrom && 'text-muted-foreground'
+              'justify-start text-left font-normal min-w-[180px]',
+              !dateRange && 'text-muted-foreground'
             )}
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
-            {dateFrom ? format(dateFrom, 'dd/MM/yyyy', { locale: ptBR }) : 'Data inicial'}
+            {formatDateRange(dateRange)}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
           <Calendar
-            mode="single"
-            selected={dateFrom}
-            onSelect={setDateFrom}
+            mode="range"
+            selected={dateRange}
+            onSelect={setDateRange}
             locale={ptBR}
+            numberOfMonths={2}
             initialFocus
+            className="p-3 pointer-events-auto"
           />
         </PopoverContent>
       </Popover>
 
-      <span className="text-muted-foreground">até</span>
+      {/* Compare Toggle */}
+      <div className="flex items-center gap-2">
+        <Switch
+          checked={compareEnabled}
+          onCheckedChange={setCompareEnabled}
+          className="data-[state=checked]:bg-primary"
+        />
+        <span className="text-sm text-muted-foreground">Comparar</span>
+      </div>
 
-      {/* Date To */}
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            className={cn(
-              'justify-start text-left font-normal min-w-[160px]',
-              !dateTo && 'text-muted-foreground'
-            )}
-          >
-            <CalendarIcon className="mr-2 h-4 w-4" />
-            {dateTo ? format(dateTo, 'dd/MM/yyyy', { locale: ptBR }) : 'Data final'}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="start">
-          <Calendar
-            mode="single"
-            selected={dateTo}
-            onSelect={setDateTo}
-            locale={ptBR}
-            initialFocus
-          />
-        </PopoverContent>
-      </Popover>
+      {compareEnabled && (
+        <>
+          <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
+          
+          {/* Compare Date Range Picker */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="default"
+                className="justify-start text-left font-normal min-w-[180px] bg-warning text-warning-foreground hover:bg-warning/90"
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {formatDateRange(compareDateRange)}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="range"
+                selected={compareDateRange}
+                onSelect={setCompareDateRange}
+                locale={ptBR}
+                numberOfMonths={2}
+                initialFocus
+                className="p-3 pointer-events-auto"
+              />
+            </PopoverContent>
+          </Popover>
+        </>
+      )}
 
       <div className="h-6 w-px bg-border mx-1 hidden sm:block" />
 
