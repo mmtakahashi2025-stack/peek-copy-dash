@@ -20,6 +20,7 @@ import { Plus, Trash2, Loader2, Save, Edit2, CalendarIcon, CheckCircle2, XCircle
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { SecondaryHeader } from '@/components/layout/SecondaryHeader';
+import comboLogo from '@/assets/combo-iguassu-logo.png';
 
 // Validation schemas
 const criterionSchema = z.object({
@@ -370,6 +371,21 @@ export default function ExcellenceStandard() {
     }));
   };
 
+  // Get logo URL for printing
+  const logoUrl = new URL(comboLogo, window.location.origin).href;
+
+  const getPrintHeader = (title: string, subtitle: string) => `
+    <div class="header">
+      <div style="display: flex; align-items: center; gap: 15px;">
+        <img src="${logoUrl}" alt="Logo" style="width: 60px; height: 60px; object-fit: contain; border-radius: 8px;" />
+        <div>
+          <h1 style="margin: 0; color: #333; font-size: 22px;">${title}</h1>
+          <h2 style="margin: 5px 0 0 0; color: #666; font-size: 14px; font-weight: normal;">${subtitle}</h2>
+        </div>
+      </div>
+    </div>
+  `;
+
   const handlePrintEvaluation = (evaluation: Evaluation) => {
     const scoresList = criteria.map((c) => {
       const score = evaluation.scores[c.id];
@@ -392,8 +408,6 @@ export default function ExcellenceStandard() {
         <title>Avaliação - ${evaluation.collaborator_name}</title>
         <style>
           body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
-          h1 { color: #333; font-size: 24px; margin-bottom: 5px; }
-          h2 { color: #666; font-size: 16px; font-weight: normal; margin-top: 0; }
           .header { border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 20px; }
           .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
           .info-item { background: #f5f5f5; padding: 10px; border-radius: 4px; }
@@ -412,10 +426,7 @@ export default function ExcellenceStandard() {
         </style>
       </head>
       <body>
-        <div class="header">
-          <h1>Avaliação Padrão de Excelência</h1>
-          <h2>Combo Iguassu</h2>
-        </div>
+        ${getPrintHeader('Avaliação Padrão de Excelência', 'Combo Iguassu - Sales Ops')}
         
         <div class="info-grid">
           <div class="info-item">
@@ -458,6 +469,139 @@ export default function ExcellenceStandard() {
           <div class="signature-line">
             <hr />
             <span>Assinatura do Avaliador</span>
+          </div>
+          <div class="signature-line">
+            <hr />
+            <span>Assinatura do Colaborador</span>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.onload = () => {
+        printWindow.print();
+      };
+    }
+  };
+
+  const handlePrintMonthlyGrid = (collaboratorName: string) => {
+    const monthStart = startOfMonth(gridMonth);
+    const monthEnd = endOfMonth(gridMonth);
+    const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
+    
+    const monthEvaluations = evaluations.filter((e) => {
+      const date = parseISO(e.evaluation_date);
+      return e.collaborator_name === collaboratorName && isWithinInterval(date, { start: monthStart, end: monthEnd });
+    });
+
+    const totalEvaluations = monthEvaluations.length;
+    const avgPercentage = totalEvaluations > 0 
+      ? monthEvaluations.reduce((sum, e) => sum + (e.percentage || 0), 0) / totalEvaluations 
+      : 0;
+
+    const gridRows = daysInMonth.map((day) => {
+      const dateStr = format(day, 'yyyy-MM-dd');
+      const evaluation = monthEvaluations.find(e => e.evaluation_date === dateStr);
+      
+      if (!evaluation) {
+        return `
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 6px; text-align: center;">${format(day, 'dd')}</td>
+            <td style="border: 1px solid #ddd; padding: 6px; text-align: center; color: #999;">-</td>
+            <td style="border: 1px solid #ddd; padding: 6px; text-align: center; color: #999;">-</td>
+            <td style="border: 1px solid #ddd; padding: 6px; text-align: center; color: #999;">-</td>
+          </tr>
+        `;
+      }
+
+      const pct = evaluation.percentage || 0;
+      return `
+        <tr>
+          <td style="border: 1px solid #ddd; padding: 6px; text-align: center; font-weight: bold;">${format(day, 'dd')}</td>
+          <td style="border: 1px solid #ddd; padding: 6px; text-align: center;">${evaluation.conversation_number || '-'}</td>
+          <td style="border: 1px solid #ddd; padding: 6px; text-align: center; font-weight: bold; color: ${pct >= 85 ? 'green' : 'red'};">
+            ${pct.toFixed(0)}%
+          </td>
+          <td style="border: 1px solid #ddd; padding: 6px; text-align: center; font-size: 11px;">${evaluation.evaluator_email || '-'}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Grade Mensal - ${collaboratorName}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+          .header { border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 20px; }
+          .info-section { background: #f5f5f5; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
+          .info-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
+          .info-label { color: #666; font-size: 13px; }
+          .info-value { font-weight: bold; font-size: 14px; }
+          table { width: 100%; border-collapse: collapse; }
+          th { background: #333; color: white; padding: 8px; text-align: center; font-size: 12px; }
+          .summary { margin-top: 20px; display: flex; gap: 20px; justify-content: center; }
+          .summary-item { background: #f5f5f5; padding: 15px 25px; border-radius: 4px; text-align: center; }
+          .summary-label { font-size: 12px; color: #666; }
+          .summary-value { font-size: 24px; font-weight: bold; }
+          .signature { margin-top: 40px; display: flex; justify-content: space-between; }
+          .signature-line { width: 45%; text-align: center; }
+          .signature-line hr { margin-bottom: 5px; }
+          .signature-line span { font-size: 12px; color: #666; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        ${getPrintHeader('Grade Mensal - Padrão de Excelência', 'Combo Iguassu - Sales Ops')}
+        
+        <div class="info-section">
+          <div class="info-row">
+            <span class="info-label">Colaborador:</span>
+            <span class="info-value">${collaboratorName}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Período:</span>
+            <span class="info-value">${MONTHS[selectedMonth]} de ${selectedYear}</span>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 50px;">Dia</th>
+              <th>Nº Conversa</th>
+              <th style="width: 80px;">Resultado</th>
+              <th>Avaliador</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${gridRows}
+          </tbody>
+        </table>
+
+        <div class="summary">
+          <div class="summary-item">
+            <div class="summary-label">Total de Avaliações</div>
+            <div class="summary-value">${totalEvaluations}</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">Média do Mês</div>
+            <div class="summary-value" style="color: ${avgPercentage >= 85 ? 'green' : totalEvaluations > 0 ? 'red' : '#333'};">
+              ${totalEvaluations > 0 ? `${avgPercentage.toFixed(1)}%` : '-'}
+            </div>
+          </div>
+        </div>
+
+        <div class="signature">
+          <div class="signature-line">
+            <hr />
+            <span>Assinatura do Gestor</span>
           </div>
           <div class="signature-line">
             <hr />
@@ -820,6 +964,7 @@ export default function ExcellenceStandard() {
                           ))}
                           <TableHead className="text-center min-w-[60px]">Total</TableHead>
                           <TableHead className="text-center min-w-[60px]">Média</TableHead>
+                          <TableHead className="text-center min-w-[50px]"></TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -976,6 +1121,17 @@ export default function ExcellenceStandard() {
                               )}>
                                 {row.total > 0 ? `${row.avgPercentage.toFixed(0)}%` : '-'}
                               </span>
+                            </TableCell>
+                            <TableCell className="text-center p-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => handlePrintMonthlyGrid(row.collaborator)}
+                                title="Imprimir grade mensal"
+                              >
+                                <Printer className="h-3.5 w-3.5" />
+                              </Button>
                             </TableCell>
                           </TableRow>
                         ))}
