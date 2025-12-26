@@ -84,7 +84,7 @@ interface SheetDataContextType {
   sheetUrl: string | null;
   filiais: FilialData[];
   colaboradores: string[];
-  getKpis: (filialId: string, dateFilter?: DateFilter) => KpiData[];
+  getKpis: (filialId: string, dateFilter?: DateFilter, leadsRecebidos?: number) => KpiData[];
   getColaboradores: (filialId: string, colaboradorId?: string) => ColaboradorData[];
   getEvolucao: () => EvolucaoData[];
   getProdutos: (filialId: string) => ProdutoData[];
@@ -393,7 +393,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   const colaboradores = Array.from(new Set(rawData.map(r => r.Emissor))).filter(Boolean);
 
   // Calculate KPIs - maintaining the original 8 KPIs
-  const getKpis = useCallback((filialId: string, dateFilter?: DateFilter): KpiData[] => {
+  const getKpis = useCallback((filialId: string, dateFilter?: DateFilter, leadsRecebidos?: number): KpiData[] => {
     // First filter by filial
     let filteredData = filialId === 'todas' 
       ? rawData 
@@ -529,13 +529,18 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       {
         id: 'conversao',
         title: 'Conversão',
-        value: '--',
+        value: leadsRecebidos && leadsRecebidos > 0 
+          ? `${((totalVendas / leadsRecebidos) * 100).toFixed(1)}%` 
+          : '--',
+        rawValue: leadsRecebidos && leadsRecebidos > 0 
+          ? (totalVendas / leadsRecebidos) * 100 
+          : undefined,
         meta: formatTarget('conversao', getTarget('conversao')),
         targetValue: getTarget('conversao'),
         variation: 0,
         isPositive: true,
-        notFound: true,
-        source: 'sheet' as const,
+        notFound: !leadsRecebidos || leadsRecebidos === 0,
+        source: 'database' as const,
       },
       {
         id: 'faturamento',
