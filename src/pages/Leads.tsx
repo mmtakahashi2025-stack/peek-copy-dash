@@ -1,32 +1,20 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSheetData } from '@/contexts/SheetDataContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isWithinInterval, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Plus, Loader2, Save, CalendarIcon, Users } from 'lucide-react';
+import { Loader2, CalendarIcon, Users, ChevronUp, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
-import { z } from 'zod';
 import { SecondaryHeader } from '@/components/layout/SecondaryHeader';
-
-// Validation schema
-const leadRecordSchema = z.object({
-  collaborator_name: z.string().min(1, 'Selecione um colaborador'),
-  record_date: z.date(),
-  leads_count: z.number().min(0, 'Quantidade deve ser maior ou igual a 0').max(9999, 'Quantidade muito alta'),
-});
 
 interface LeadRecord {
   id: string;
@@ -34,6 +22,12 @@ interface LeadRecord {
   record_date: string;
   leads_count: number;
 }
+
+// Month names in Portuguese
+const MONTHS = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
 
 export default function Leads() {
   const { user, loading: authLoading } = useAuth();
@@ -44,16 +38,13 @@ export default function Leads() {
   // State
   const [records, setRecords] = useState<LeadRecord[]>([]);
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [savingCell, setSavingCell] = useState<string | null>(null);
   
-  // Form state
-  const [selectedCollaborator, setSelectedCollaborator] = useState('');
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [leadsCount, setLeadsCount] = useState('');
-  
-  // Month filter for grid view
-  const [gridMonth, setGridMonth] = useState<Date>(new Date());
+  // Month/Year filter for grid view
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+  const gridMonth = useMemo(() => new Date(selectedYear, selectedMonth, 1), [selectedYear, selectedMonth]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -83,63 +74,78 @@ export default function Leads() {
     }
   };
 
-  const handleSaveRecord = async () => {
-    const validationResult = leadRecordSchema.safeParse({
-      collaborator_name: selectedCollaborator,
-      record_date: selectedDate,
-      leads_count: parseInt(leadsCount) || 0,
-    });
-
-    if (!validationResult.success) {
-      toast.error(validationResult.error.errors[0].message);
-      return;
-    }
-
-    const validated = validationResult.data;
-    setSaving(true);
+  // Save record directly (upsert)
+  const saveRecord = useCallback(async (collaborator: string, dateStr: string, newCount: number) => {
+    const cellKey = `${collaborator}-${dateStr}`;
+    setSavingCell(cellKey);
 
     try {
-      // Check if record exists for this collaborator and date
-      const dateStr = format(validated.record_date, 'yyyy-MM-dd');
+      // Check if record exists
       const { data: existing } = await supabase
         .from('lead_records')
         .select('id')
-        .eq('collaborator_name', validated.collaborator_name)
+        .eq('collaborator_name', collaborator)
         .eq('record_date', dateStr)
         .maybeSingle();
 
       if (existing) {
-        // Update existing record
-        const { error } = await supabase
-          .from('lead_records')
-          .update({ leads_count: validated.leads_count })
-          .eq('id', existing.id);
-
-        if (error) throw error;
-        toast.success('Registro atualizado!');
-      } else {
-        // Insert new record
+        if (newCount === 0) {
+          // Delete if count is 0
+          const { error } = await supabase
+            .from('lead_records')
+            .delete()
+            .eq('id', existing.id);
+          if (error) throw error;
+        } else {
+          // Update existing
+          const { error } = await supabase
+            .from('lead_records')
+            .update({ leads_count: newCount })
+            .eq('id', existing.id);
+          if (error) throw error;
+        }
+      } else if (newCount > 0) {
+        // Insert new
         const { error } = await supabase
           .from('lead_records')
           .insert({
-            collaborator_name: validated.collaborator_name,
+            collaborator_name: collaborator,
             record_date: dateStr,
-            leads_count: validated.leads_count,
+            leads_count: newCount,
           });
-
         if (error) throw error;
-        toast.success('Registro salvo!');
       }
 
-      setShowAddDialog(false);
-      setSelectedCollaborator('');
-      setLeadsCount('');
-      loadRecords();
+      // Update local state optimistically
+      setRecords(prev => {
+        const filtered = prev.filter(
+          r => !(r.collaborator_name === collaborator && r.record_date === dateStr)
+        );
+        if (newCount > 0) {
+          return [...filtered, {
+            id: existing?.id || 'temp',
+            collaborator_name: collaborator,
+            record_date: dateStr,
+            leads_count: newCount,
+          }];
+        }
+        return filtered;
+      });
     } catch (error) {
       console.error('Error saving lead record:', error);
-      toast.error('Erro ao salvar registro');
+      toast.error('Erro ao salvar');
     } finally {
-      setSaving(false);
+      setSavingCell(null);
+    }
+  }, []);
+
+  const handleIncrement = (collaborator: string, dateStr: string, currentValue: number) => {
+    saveRecord(collaborator, dateStr, currentValue + 1);
+  };
+
+  const handleDecrement = (collaborator: string, dateStr: string, currentValue: number) => {
+    if (currentValue > 0) {
+      saveRecord(collaborator, dateStr, currentValue - 1);
     }
   };
 
@@ -197,11 +203,19 @@ export default function Leads() {
     return { grid, daysInMonth, dailyTotals, grandTotal };
   }, [records, gridMonth, colaboradores]);
 
-  // Ranking data
+  // Ranking data - filtered by selected month
   const rankingData = useMemo(() => {
+    const monthStart = startOfMonth(gridMonth);
+    const monthEnd = endOfMonth(gridMonth);
+    
+    const monthRecords = records.filter((r) => {
+      const date = parseISO(r.record_date);
+      return isWithinInterval(date, { start: monthStart, end: monthEnd });
+    });
+
     const totals: Record<string, number> = {};
     
-    records.forEach((r) => {
+    monthRecords.forEach((r) => {
       if (!totals[r.collaborator_name]) {
         totals[r.collaborator_name] = 0;
       }
@@ -211,14 +225,13 @@ export default function Leads() {
     return Object.entries(totals)
       .map(([name, total]) => ({ name, total }))
       .sort((a, b) => b.total - a.total);
-  }, [records]);
+  }, [records, gridMonth]);
 
-  const handleCellClick = (collaborator: string, dateStr: string, currentValue: number) => {
-    setSelectedCollaborator(collaborator);
-    setSelectedDate(parseISO(dateStr));
-    setLeadsCount(currentValue.toString());
-    setShowAddDialog(true);
-  };
+  // Generate year options (current year and 2 years before/after)
+  const yearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return [currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
+  }, []);
 
   if (authLoading) {
     return (
@@ -248,99 +261,48 @@ export default function Leads() {
                     <PopoverTrigger asChild>
                       <Button variant="outline" className="gap-2">
                         <CalendarIcon className="h-4 w-4" />
-                        {format(gridMonth, 'MMMM yyyy', { locale: ptBR })}
+                        {MONTHS[selectedMonth]} {selectedYear}
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="end">
-                      <Calendar
-                        mode="single"
-                        selected={gridMonth}
-                        onSelect={(date) => date && setGridMonth(date)}
-                        locale={ptBR}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <Dialog open={showAddDialog} onOpenChange={(open) => {
-                    setShowAddDialog(open);
-                    if (!open) {
-                      setSelectedCollaborator('');
-                      setLeadsCount('');
-                    }
-                  }}>
-                    <DialogTrigger asChild>
-                      <Button size="sm" className="gap-2">
-                        <Plus className="h-4 w-4" />
-                        Adicionar
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Registrar Leads</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
+                    <PopoverContent className="w-auto p-4 pointer-events-auto" align="end">
+                      <div className="space-y-4">
                         <div className="space-y-2">
-                          <Label>Colaborador</Label>
-                          <Select value={selectedCollaborator} onValueChange={setSelectedCollaborator}>
+                          <label className="text-sm font-medium">Ano</label>
+                          <Select 
+                            value={selectedYear.toString()} 
+                            onValueChange={(v) => setSelectedYear(parseInt(v))}
+                          >
                             <SelectTrigger>
-                              <SelectValue placeholder="Selecione..." />
+                              <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              {colaboradores.map((collab) => (
-                                <SelectItem key={collab} value={collab}>
-                                  {collab}
+                              {yearOptions.map((year) => (
+                                <SelectItem key={year} value={year.toString()}>
+                                  {year}
                                 </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label>Data</Label>
-                          <Popover>
-                            <PopoverTrigger asChild>
+                          <label className="text-sm font-medium">Mês</label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {MONTHS.map((month, index) => (
                               <Button
-                                variant="outline"
-                                className={cn(
-                                  'w-full justify-start text-left font-normal',
-                                  !selectedDate && 'text-muted-foreground'
-                                )}
+                                key={month}
+                                variant={selectedMonth === index ? 'default' : 'outline'}
+                                size="sm"
+                                className="text-xs"
+                                onClick={() => setSelectedMonth(index)}
                               >
-                                <CalendarIcon className="mr-2 h-4 w-4" />
-                                {selectedDate ? format(selectedDate, 'PPP', { locale: ptBR }) : 'Selecione...'}
+                                {month.slice(0, 3)}
                               </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0" align="start">
-                              <Calendar
-                                mode="single"
-                                selected={selectedDate}
-                                onSelect={(date) => date && setSelectedDate(date)}
-                                locale={ptBR}
-                              />
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Quantidade de Leads</Label>
-                          <Input
-                            type="number"
-                            min="0"
-                            placeholder="0"
-                            value={leadsCount}
-                            onChange={(e) => setLeadsCount(e.target.value)}
-                          />
+                            ))}
+                          </div>
                         </div>
                       </div>
-                      <DialogFooter>
-                        <Button onClick={handleSaveRecord} disabled={saving}>
-                          {saving ? (
-                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          ) : (
-                            <Save className="h-4 w-4 mr-2" />
-                          )}
-                          Salvar
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </CardHeader>
               <CardContent>
@@ -350,7 +312,7 @@ export default function Leads() {
                   </div>
                 ) : gridData.grid.length === 0 ? (
                   <p className="text-center text-muted-foreground py-8">
-                    Nenhum registro encontrado para este mês
+                    Nenhum colaborador encontrado. Carregue a planilha de vendas para ver os colaboradores.
                   </p>
                 ) : (
                   <div className="overflow-x-auto">
@@ -359,7 +321,7 @@ export default function Leads() {
                         <TableRow>
                           <TableHead className="sticky left-0 bg-card z-10 min-w-[200px]">Colaborador</TableHead>
                           {gridData.daysInMonth.map((day) => (
-                            <TableHead key={day.toISOString()} className="text-center min-w-[50px]">
+                            <TableHead key={day.toISOString()} className="text-center min-w-[60px] px-1">
                               {format(day, 'dd')}
                             </TableHead>
                           ))}
@@ -375,19 +337,45 @@ export default function Leads() {
                             {gridData.daysInMonth.map((day) => {
                               const dateStr = format(day, 'yyyy-MM-dd');
                               const value = row[dateStr] as number || 0;
+                              const cellKey = `${row.collaborator}-${dateStr}`;
+                              const isSaving = savingCell === cellKey;
+
                               return (
                                 <TableCell
                                   key={dateStr}
                                   className={cn(
-                                    'text-center cursor-pointer hover:bg-muted/50 transition-colors',
-                                    value > 0 && 'font-medium',
-                                    value >= 15 && 'bg-green-500/20 text-green-700 dark:text-green-400',
-                                    value >= 10 && value < 15 && 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400',
-                                    value > 0 && value < 10 && 'bg-orange-500/20 text-orange-700 dark:text-orange-400'
+                                    'text-center p-0 h-12',
+                                    value >= 15 && 'bg-green-500/20',
+                                    value >= 10 && value < 15 && 'bg-yellow-500/20',
+                                    value > 0 && value < 10 && 'bg-orange-500/20'
                                   )}
-                                  onClick={() => handleCellClick(row.collaborator as string, dateStr, value)}
                                 >
-                                  {value > 0 ? value : '-'}
+                                  <div className="flex flex-col items-center justify-center h-full group relative">
+                                    <button
+                                      className="w-full h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted/50"
+                                      onClick={() => handleIncrement(row.collaborator as string, dateStr, value)}
+                                      disabled={isSaving}
+                                    >
+                                      <ChevronUp className="h-3 w-3" />
+                                    </button>
+                                    <span className={cn(
+                                      'text-sm',
+                                      value > 0 && 'font-medium',
+                                      value >= 15 && 'text-green-700 dark:text-green-400',
+                                      value >= 10 && value < 15 && 'text-yellow-700 dark:text-yellow-400',
+                                      value > 0 && value < 10 && 'text-orange-700 dark:text-orange-400',
+                                      isSaving && 'opacity-50'
+                                    )}>
+                                      {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : (value > 0 ? value : '-')}
+                                    </span>
+                                    <button
+                                      className="w-full h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted/50"
+                                      onClick={() => handleDecrement(row.collaborator as string, dateStr, value)}
+                                      disabled={isSaving || value === 0}
+                                    >
+                                      <ChevronDown className="h-3 w-3" />
+                                    </button>
+                                  </div>
                                 </TableCell>
                               );
                             })}
@@ -420,10 +408,10 @@ export default function Leads() {
 
           <TabsContent value="ranking">
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Users className="h-5 w-5" />
-                  Ranking de Leads por Colaborador
+                  Ranking de Leads - {MONTHS[selectedMonth]} {selectedYear}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -433,7 +421,7 @@ export default function Leads() {
                   </div>
                 ) : rankingData.length === 0 ? (
                   <p className="text-center text-muted-foreground py-8">
-                    Nenhum registro encontrado
+                    Nenhum registro encontrado para este mês
                   </p>
                 ) : (
                   <div className="space-y-2">
