@@ -15,10 +15,10 @@ interface KPICardProps {
 }
 
 export function KPICard({ title, value, rawValue, meta, targetValue, previousValue, variation, isPositive, notFound }: KPICardProps) {
-  // Calculate if value meets target
+  // Calculate variance from target (how far above/below)
   const hasTarget = targetValue !== undefined && targetValue > 0 && rawValue !== undefined;
   const meetsTarget = hasTarget && rawValue >= targetValue;
-  const targetPercentage = hasTarget ? ((rawValue / targetValue) * 100) : undefined;
+  const targetVariance = hasTarget ? (((rawValue - targetValue) / targetValue) * 100) : undefined;
 
   if (notFound) {
     return (
@@ -62,7 +62,7 @@ export function KPICard({ title, value, rawValue, meta, targetValue, previousVal
                 ) : (
                   <ArrowDown className="h-3 w-3" />
                 )}
-                <span>{targetPercentage?.toFixed(0)}%</span>
+                <span>{targetVariance! >= 0 ? '+' : ''}{targetVariance?.toFixed(0)}%</span>
               </div>
             )}
             {/* Variation indicator */}
