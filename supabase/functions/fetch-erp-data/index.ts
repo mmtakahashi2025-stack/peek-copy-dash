@@ -218,6 +218,7 @@ serve(async (req) => {
       : `device_id=${deviceId}`;
     
     console.log('[ERP] Login OK. Usuário:', loginResult.data.user?.name);
+    console.log('[ERP] Token JWT (primeiros 50 chars):', jwtToken.substring(0, 50) + '...');
     console.log('[ERP] Cookies do servidor:', serverCookies || 'Nenhum');
     console.log('[ERP] Cookies finais:', fullCookies);
 
@@ -227,6 +228,7 @@ serve(async (req) => {
     // ============================================
     const salesUrl = `${erpBaseUrl}/api/vendas/vendasEmissorExpandido`;
     
+    // Build headers - some APIs need different auth patterns
     const salesHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
@@ -241,6 +243,7 @@ serve(async (req) => {
     };
 
     console.log('[ERP] Buscando vendas...', JSON.stringify(salesBody));
+    console.log('[ERP] Headers enviados:', JSON.stringify(Object.keys(salesHeaders)));
 
     const salesResponse = await fetch(salesUrl, {
       method: 'POST',
