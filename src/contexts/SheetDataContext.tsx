@@ -136,8 +136,7 @@ interface SheetDataContextType {
 
 const SheetDataContext = createContext<SheetDataContextType | undefined>(undefined);
 
-const ERP_DATA_KEY = 'dashboard_erp_data';
-const ERP_PERIOD_KEY = 'dashboard_erp_period';
+// Note: Removed sessionStorage caching for security - sensitive data stays in memory only
 
 const colors = ['bg-primary', 'bg-success', 'bg-warning', 'bg-chart-4', 'bg-chart-5', 'bg-primary/80', 'bg-success/80', 'bg-warning/80'];
 
@@ -187,7 +186,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     status: 'idle',
   });
 
-  // Fetch ERP credentials from profile
+  // Fetch ERP credentials from profile using secure RPC function
   const refreshErpCredentials = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -195,16 +194,25 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('email, erp_password')
-      .eq('id', user.id)
-      .maybeSingle();
+    // Use the secure RPC function to get decrypted password
+    const { data: decryptedPassword, error } = await supabase.rpc('get_erp_password', {
+      target_user_id: user.id
+    });
+
+    if (error) {
+      console.error('Error fetching ERP credentials:', error);
+      setErpCredentials({
+        email: user.email || '',
+        password: null,
+        hasPassword: false,
+      });
+      return;
+    }
 
     setErpCredentials({
       email: user.email || '',
-      password: profile?.erp_password || null,
-      hasPassword: !!profile?.erp_password,
+      password: decryptedPassword || null,
+      hasPassword: !!decryptedPassword,
     });
   }, []);
 
@@ -309,32 +317,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     fetchExcellenceData();
   }, [fetchExcellencePercentage]);
 
-  // Load saved data on mount
-  useEffect(() => {
-    const savedData = sessionStorage.getItem(ERP_DATA_KEY);
-    const savedPeriod = sessionStorage.getItem(ERP_PERIOD_KEY);
-    
-    if (savedData) {
-      try {
-        setRawData(JSON.parse(savedData));
-        setIsConnected(true);
-      } catch {
-        console.error('Failed to parse saved ERP data');
-      }
-    }
-    
-    if (savedPeriod) {
-      try {
-        const period = JSON.parse(savedPeriod);
-        setCurrentPeriod({
-          dateFrom: new Date(period.dateFrom),
-          dateTo: new Date(period.dateTo),
-        });
-      } catch {
-        console.error('Failed to parse saved period');
-      }
-    }
-  }, []);
+  // Note: We no longer cache sensitive ERP data in sessionStorage for security reasons.
+  // Data is kept in React state only and fetched fresh on each session.
 
   // Subscribe to realtime updates from other users
   useEffect(() => {
@@ -351,7 +335,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         
         setRawData(data);
         setIsConnected(true);
-        sessionStorage.setItem(ERP_DATA_KEY, JSON.stringify(data));
+        // Note: No longer caching in sessionStorage for security
         toast.info('Dados atualizados por outro usuário');
       })
       .subscribe();
@@ -434,9 +418,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         status: 'success',
       }));
       
-      // Save to sessionStorage
-      sessionStorage.setItem(ERP_DATA_KEY, JSON.stringify(data));
-      sessionStorage.setItem(ERP_PERIOD_KEY, JSON.stringify({ dateFrom: startDate, dateTo: endDate }));
+      // Note: No longer caching in sessionStorage for security
       
       // Broadcast to other users
       if (broadcast) {

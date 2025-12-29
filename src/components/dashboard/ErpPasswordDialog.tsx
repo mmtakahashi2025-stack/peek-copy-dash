@@ -28,33 +28,13 @@ export function ErpPasswordDialog({ open, onOpenChange, onSaved }: ErpPasswordDi
 
     setIsSaving(true);
     try {
-      // Check if profile exists
-      const { data: existingProfile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', user.id)
-        .maybeSingle();
+      // Use the secure RPC function to save encrypted password
+      const { error } = await supabase.rpc('save_erp_password', {
+        target_user_id: user.id,
+        plain_password: password.trim()
+      });
 
-      if (existingProfile) {
-        // Update existing profile
-        const { error } = await supabase
-          .from('profiles')
-          .update({ erp_password: password })
-          .eq('id', user.id);
-
-        if (error) throw error;
-      } else {
-        // Insert new profile
-        const { error } = await supabase
-          .from('profiles')
-          .insert({ 
-            id: user.id, 
-            email: user.email,
-            erp_password: password 
-          });
-
-        if (error) throw error;
-      }
+      if (error) throw error;
 
       toast.success('Senha do ERP salva com sucesso!');
       setPassword('');
