@@ -14,7 +14,9 @@ interface Filters {
   dateFrom: Date | undefined;
   dateTo: Date | undefined;
   filial: string;
+  filiais: string[];
   colaborador: string;
+  colaboradores: string[];
   compareEnabled: boolean;
   compareDateFrom: Date | undefined;
   compareDateTo: Date | undefined;
@@ -28,7 +30,9 @@ export default function Dashboard() {
     dateFrom: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     dateTo: new Date(),
     filial: 'todas',
+    filiais: ['todas'],
     colaborador: 'todos',
+    colaboradores: ['todos'],
     compareEnabled: false,
     compareDateFrom: new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1),
     compareDateTo: new Date(new Date().getFullYear(), new Date().getMonth(), 0),
