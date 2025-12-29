@@ -10,6 +10,7 @@ interface SalesRequestBody {
   endDate: string;
   email?: string;
   password?: string;
+  usePagination?: boolean; // Enable monthly pagination for large date ranges
 }
 
 interface ERPLoginResponse {
@@ -113,6 +114,170 @@ function extractCookiesFromHeaders(headers: Headers): { ERPSession: string | nul
   return { ERPSession: erpSession, device_id: deviceId };
 }
 
+// Parse date in DD/MM/YYYY format
+function parseDate(dateStr: string): Date {
+  const [day, month, year] = dateStr.split('/').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+// Format date to DD/MM/YYYY
+function formatDate(date: Date): string {
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+// Generate monthly periods between two dates
+function generateMonthlyPeriods(startDate: string, endDate: string): Array<{ start: string; end: string }> {
+  const start = parseDate(startDate);
+  const end = parseDate(endDate);
+  const periods: Array<{ start: string; end: string }> = [];
+  
+  let current = new Date(start);
+  
+  while (current <= end) {
+    const periodStart = new Date(current);
+    const periodEnd = new Date(current.getFullYear(), current.getMonth() + 1, 0); // Last day of month
+    
+    // If this is the first period, use the original start date
+    const actualStart = periods.length === 0 ? start : periodStart;
+    // If this period goes beyond the end date, use the end date
+    const actualEnd = periodEnd > end ? end : periodEnd;
+    
+    periods.push({
+      start: formatDate(actualStart),
+      end: formatDate(actualEnd),
+    });
+    
+    // Move to first day of next month
+    current = new Date(current.getFullYear(), current.getMonth() + 1, 1);
+  }
+  
+  return periods;
+}
+
+// Check if date range spans more than one month
+function isLargeDateRange(startDate: string, endDate: string): boolean {
+  const start = parseDate(startDate);
+  const end = parseDate(endDate);
+  const diffMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+  return diffMonths >= 1;
+}
+
+interface AuthResult {
+  success: boolean;
+  token?: string;
+  cookies?: { ERPSession: string; device_id: string };
+  user?: { name: string };
+  error?: string;
+}
+
+async function authenticateERP(erpBaseUrl: string, erpEmail: string, erpPassword: string): Promise<AuthResult> {
+  const loginUrl = `${erpBaseUrl}/auth/login?email=${encodeURIComponent(erpEmail)}&password=${encodeURIComponent(erpPassword)}`;
+
+  console.log('[ERP] Autenticando...');
+
+  const loginResponse = await fetch(loginUrl, {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+      'User-Agent': 'Mozilla/5.0',
+    },
+  });
+
+  console.log('[ERP] Login status:', loginResponse.status);
+
+  const loginText = await loginResponse.text();
+  
+  let loginResult: ERPLoginResponse;
+  try {
+    loginResult = JSON.parse(loginText);
+  } catch {
+    console.error('[ERP] Resposta inválida:', loginText.substring(0, 200));
+    return { success: false, error: 'Resposta inválida do ERP no login' };
+  }
+
+  if (!loginResult.success || !loginResult.data?.token) {
+    console.error('[ERP] Login falhou:', JSON.stringify(loginResult));
+    return { success: false, error: 'Credenciais inválidas' };
+  }
+
+  const cookies = extractCookiesFromHeaders(loginResponse.headers);
+  
+  console.log('[ERP] Login OK. Usuário:', loginResult.data.user?.name);
+
+  if (!cookies.ERPSession || !cookies.device_id) {
+    console.error('[ERP] Cookies incompletos');
+    return { success: false, error: 'Sessão do ERP incompleta' };
+  }
+
+  return {
+    success: true,
+    token: loginResult.data.token,
+    cookies: { ERPSession: cookies.ERPSession, device_id: cookies.device_id },
+    user: { name: loginResult.data.user?.name || 'Unknown' },
+  };
+}
+
+async function fetchSalesForPeriod(
+  erpBaseUrl: string,
+  token: string,
+  cookies: { ERPSession: string; device_id: string },
+  startDate: string,
+  endDate: string
+): Promise<{ success: boolean; data?: TransformedSaleRow[]; error?: string }> {
+  const cookieHeader = `ERPSession=${cookies.ERPSession}; device_id=${cookies.device_id}`;
+  const salesUrl = `${erpBaseUrl}/vendas/vendasEmissorExpandido`;
+  const salesBody = JSON.stringify({
+    StartDate: startDate,
+    EndDate: endDate,
+  });
+
+  console.log(`[ERP] Buscando vendas de ${startDate} até ${endDate}...`);
+
+  const salesResponse = await fetch(salesUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      'Cookie': cookieHeader,
+      'User-Agent': 'Mozilla/5.0',
+    },
+    body: salesBody,
+  });
+
+  console.log('[ERP] Sales status:', salesResponse.status);
+
+  const salesText = await salesResponse.text();
+
+  if (!salesResponse.ok) {
+    let errorMessage = 'Erro ao buscar vendas';
+    try {
+      const errorParsed = JSON.parse(salesText);
+      errorMessage = errorParsed?.data || errorParsed?.error || errorParsed?.message || errorMessage;
+    } catch {
+      if (salesText.length < 200) errorMessage = salesText;
+    }
+    return { success: false, error: errorMessage };
+  }
+
+  let salesResult: { data?: Record<string, ERPSaleItem>; success?: boolean };
+  try {
+    salesResult = JSON.parse(salesText);
+  } catch {
+    return { success: false, error: 'Resposta inválida do ERP' };
+  }
+
+  const erpData = salesResult.data || salesResult;
+  const transformedData = transformERPData(erpData as Record<string, ERPSaleItem>);
+  
+  console.log(`[ERP] Período ${startDate}-${endDate}: ${transformedData.length} registros`);
+
+  return { success: true, data: transformedData };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -126,6 +291,7 @@ serve(async (req) => {
   let endDate: string;
   let userEmail: string | undefined;
   let userPassword: string | undefined;
+  let usePagination = true; // Default to true for automatic pagination
   
   try {
     const body: SalesRequestBody = await req.json();
@@ -133,6 +299,9 @@ serve(async (req) => {
     endDate = body.endDate;
     userEmail = body.email;
     userPassword = body.password;
+    if (typeof body.usePagination === 'boolean') {
+      usePagination = body.usePagination;
+    }
   } catch {
     const now = new Date();
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -157,129 +326,89 @@ serve(async (req) => {
 
   console.log('[ERP] Buscando vendas de', startDate, 'até', endDate);
   console.log('[ERP] Usando credenciais do usuário:', userEmail ? 'SIM' : 'NÃO (fallback env)');
+  console.log('[ERP] Paginação mensal:', usePagination ? 'SIM' : 'NÃO');
 
   try {
     // STEP 1: LOGIN
-    const loginUrl = `${erpBaseUrl}/auth/login?email=${encodeURIComponent(erpEmail)}&password=${encodeURIComponent(erpPassword)}`;
-
-    console.log('[ERP] Autenticando...');
-
-    const loginResponse = await fetch(loginUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0',
-      },
-    });
-
-    console.log('[ERP] Login status:', loginResponse.status);
-
-    const loginText = await loginResponse.text();
+    const authResult = await authenticateERP(erpBaseUrl, erpEmail, erpPassword);
     
-    let loginResult: ERPLoginResponse;
-    try {
-      loginResult = JSON.parse(loginText);
-    } catch {
-      console.error('[ERP] Resposta inválida:', loginText.substring(0, 200));
-      return new Response(
-        JSON.stringify({ success: false, error: 'Resposta inválida do ERP no login' }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    if (!loginResult.success || !loginResult.data?.token) {
-      console.error('[ERP] Login falhou:', JSON.stringify(loginResult));
+    if (!authResult.success || !authResult.token || !authResult.cookies) {
+      const isInvalidCreds = authResult.error?.includes('Credenciais inválidas');
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: 'Credenciais inválidas. Verifique seu email e senha do ERP.',
-          invalidCredentials: true
+          error: authResult.error || 'Erro de autenticação',
+          invalidCredentials: isInvalidCreds
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Extract cookies
-    const cookies = extractCookiesFromHeaders(loginResponse.headers);
+    // STEP 2: FETCH SALES (with or without pagination)
+    let allData: TransformedSaleRow[] = [];
     
-    console.log('[ERP] Login OK. Usuário:', loginResult.data.user?.name);
-
-    if (!cookies.ERPSession || !cookies.device_id) {
-      console.error('[ERP] Cookies incompletos');
-      return new Response(
-        JSON.stringify({ success: false, error: 'Sessão do ERP incompleta' }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // STEP 2: FETCH SALES
-    const jwtToken = loginResult.data.token;
-    const cookieHeader = `ERPSession=${cookies.ERPSession}; device_id=${cookies.device_id}`;
-    const salesUrl = `${erpBaseUrl}/vendas/vendasEmissorExpandido`;
-    const salesBody = JSON.stringify({
-      StartDate: startDate,
-      EndDate: endDate,
-    });
-
-    console.log('[ERP] Buscando vendas...');
-
-    const salesResponse = await fetch(salesUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'Authorization': `Bearer ${jwtToken}`,
-        'Cookie': cookieHeader,
-        'User-Agent': 'Mozilla/5.0',
-      },
-      body: salesBody,
-    });
-
-    console.log('[ERP] Sales status:', salesResponse.status);
-
-    const salesText = await salesResponse.text();
-
-    if (!salesResponse.ok) {
-      let errorMessage = 'Erro ao buscar vendas';
-      try {
-        const errorParsed = JSON.parse(salesText);
-        errorMessage = errorParsed?.data || errorParsed?.error || errorParsed?.message || errorMessage;
-      } catch {
-        if (salesText.length < 200) errorMessage = salesText;
+    // Check if we should use pagination (for large date ranges)
+    const shouldPaginate = usePagination && isLargeDateRange(startDate, endDate);
+    
+    if (shouldPaginate) {
+      // Use monthly pagination
+      const periods = generateMonthlyPeriods(startDate, endDate);
+      console.log(`[ERP] Usando paginação mensal: ${periods.length} períodos`);
+      
+      for (const period of periods) {
+        const result = await fetchSalesForPeriod(
+          erpBaseUrl,
+          authResult.token,
+          authResult.cookies,
+          period.start,
+          period.end
+        );
+        
+        if (result.success && result.data) {
+          allData = [...allData, ...result.data];
+        } else {
+          console.error(`[ERP] Erro no período ${period.start}-${period.end}:`, result.error);
+          // Continue with other periods even if one fails
+        }
+        
+        // Small delay between requests to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
       
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: errorMessage,
-          httpStatus: salesResponse.status,
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      console.log(`[ERP] Total após paginação: ${allData.length} registros`);
+    } else {
+      // Single request for short periods
+      const result = await fetchSalesForPeriod(
+        erpBaseUrl,
+        authResult.token,
+        authResult.cookies,
+        startDate,
+        endDate
       );
+      
+      if (!result.success) {
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: result.error || 'Erro ao buscar vendas'
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      allData = result.data || [];
     }
-
-    let salesResult: { data?: Record<string, ERPSaleItem>; success?: boolean };
-    try {
-      salesResult = JSON.parse(salesText);
-    } catch {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Resposta inválida do ERP' }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const erpData = salesResult.data || salesResult;
-    const transformedData = transformERPData(erpData as Record<string, ERPSaleItem>);
     
-    console.log(`[ERP] Sucesso! ${transformedData.length} registros`);
+    console.log(`[ERP] Sucesso! ${allData.length} registros totais`);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        data: transformedData,
-        count: transformedData.length,
+        data: allData,
+        count: allData.length,
         period: { startDate, endDate },
-        user: loginResult.data.user?.name,
+        user: authResult.user?.name,
+        paginated: shouldPaginate,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
