@@ -7,7 +7,7 @@ import { ProductRankingCard } from '@/components/dashboard/ProductRankingCard';
 import { SalesEvolutionChart } from '@/components/dashboard/SalesEvolutionChart';
 import { ErpPasswordDialog } from '@/components/dashboard/ErpPasswordDialog';
 import { useSheetData, KpiData } from '@/contexts/SheetDataContext';
-import { Database, Loader2, KeyRound } from 'lucide-react';
+import { Loader2, KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface Filters {
@@ -143,25 +143,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {!hasData && !isLoading && erpCredentials?.hasPassword && (
-          <div className="flex items-center gap-3 p-4 bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 rounded-xl">
-            <Database className="h-5 w-5 flex-shrink-0" />
-            <div className="flex-1">
-              <p className="font-medium">Nenhum dado carregado</p>
-              <p className="text-sm opacity-80">
-                Os dados serão carregados automaticamente do sistema ERP.
-              </p>
-            </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => loadErpData(filters.dateFrom, filters.dateTo)}
-              disabled={isLoading}
-            >
-              Carregar Dados
-            </Button>
-          </div>
-        )}
 
         {/* ERP Password Dialog */}
         <ErpPasswordDialog 
