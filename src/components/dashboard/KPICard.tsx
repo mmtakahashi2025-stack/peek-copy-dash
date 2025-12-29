@@ -14,7 +14,7 @@ interface KPICardProps {
   isPositive: boolean;
   notFound?: boolean;
   source?: 'sheet' | 'database' | 'erp';
-  isLoading?: boolean;
+  animationKey?: number;
 }
 
 export function KPICardSkeleton() {
@@ -34,7 +34,7 @@ export function KPICardSkeleton() {
   );
 }
 
-export function KPICard({ title, value, rawValue, meta, targetValue, previousValue, variation, isPositive, notFound, source = 'sheet' }: KPICardProps) {
+export function KPICard({ title, value, rawValue, meta, targetValue, previousValue, variation, isPositive, notFound, source = 'sheet', animationKey }: KPICardProps) {
   // Calculate variance from target (how far above/below)
   const hasTarget = targetValue !== undefined && targetValue > 0 && rawValue !== undefined;
   const meetsTarget = hasTarget && rawValue >= targetValue;
@@ -71,7 +71,13 @@ export function KPICard({ title, value, rawValue, meta, targetValue, previousVal
   }
 
   return (
-    <Card className="overflow-hidden transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
+    <Card 
+      key={animationKey}
+      className={cn(
+        "overflow-hidden transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5",
+        animationKey && animationKey > 1 && "animate-data-pulse"
+      )}
+    >
       <CardContent className="p-5">
         <div className="flex items-start justify-between mb-3">
           <span className="text-sm font-medium text-muted-foreground">{title}</span>

@@ -36,6 +36,14 @@ export default function Dashboard() {
 
   const [kpis, setKpis] = useState<KpiData[]>([]);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
+  const [dataRefreshKey, setDataRefreshKey] = useState(0);
+
+  // Trigger pulse animation when data changes
+  useEffect(() => {
+    if (rawData.length > 0) {
+      setDataRefreshKey(prev => prev + 1);
+    }
+  }, [rawData]);
 
   const handleFiltersChange = useCallback((newFilters: Filters) => {
     setFilters(newFilters);
@@ -157,7 +165,7 @@ export default function Dashboard() {
           ) : (
             kpis.map((kpi) => (
               <KPICard
-                key={kpi.id}
+                key={`${kpi.id}-${dataRefreshKey}`}
                 title={kpi.title}
                 value={kpi.value}
                 rawValue={kpi.rawValue}
@@ -168,6 +176,7 @@ export default function Dashboard() {
                 isPositive={kpi.isPositive}
                 notFound={kpi.notFound}
                 source={kpi.source}
+                animationKey={dataRefreshKey}
               />
             ))
           )}
