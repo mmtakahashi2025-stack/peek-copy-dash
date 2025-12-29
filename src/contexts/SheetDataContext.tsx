@@ -153,8 +153,8 @@ interface SheetDataContextType {
   fetchExcellencePercentage: (dateFilter?: DateFilter) => Promise<number | null>;
   fetchLeadsTotal: (dateFilter?: DateFilter) => Promise<number | null>;
   refreshErpCredentials: () => Promise<void>;
-  clearCache: () => void;
-  getCacheInfo: (dateFrom: Date, dateTo: Date) => { isCached: boolean; cachedAt: Date | null; recordCount: number };
+  clearCache: () => Promise<void>;
+  getCacheInfo: (dateFrom: Date, dateTo: Date) => Promise<{ isCached: boolean; cachedAt: Date | null; recordCount: number }>;
 }
 
 const SheetDataContext = createContext<SheetDataContextType | undefined>(undefined);
@@ -429,16 +429,16 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
 
   // Progressive loading with smart caching - only fetches months that need refresh
   const loadErpDataProgressive = useCallback(async (startDate: Date, endDate: Date, forceRefresh = false) => {
-    // Get months that need refresh vs cached months
+    // Get months that need refresh vs cached months (now async)
     const monthsToRefresh = forceRefresh 
       ? generateMonthlyPeriods(startDate, endDate).map(p => ({
           year: p.start.getFullYear(),
           month: p.start.getMonth() + 1,
           label: p.label,
         }))
-      : getMonthsToRefresh(startDate, endDate);
+      : await getMonthsToRefresh(startDate, endDate);
     
-    const cachedMonths = forceRefresh ? [] : getCachedMonths(startDate, endDate);
+    const cachedMonths = forceRefresh ? [] : await getCachedMonths(startDate, endDate);
     
     // Start with cached data
     const allData: RawSaleRow[] = [];
@@ -460,7 +460,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         recordsLoaded: allData.length,
         status: 'success',
       }));
-      toast.success(`${allData.length.toLocaleString('pt-BR')} registros carregados do cache`);
+      toast.success(`${allData.length.toLocaleString('pt-BR')} registros carregados do cache (Supabase)`);
       return;
     }
     
@@ -535,8 +535,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
           monthData = (response?.data || []) as RawSaleRow[];
           success = true;
           
-          // Save this month to cache immediately
-          setMonthData(monthInfo.year, monthInfo.month, monthData);
+          // Save this month to cache immediately (async)
+          await setMonthData(monthInfo.year, monthInfo.month, monthData);
           
           break;
         } catch (err) {
@@ -716,9 +716,9 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       // Use smart progressive loading with cache awareness
       await loadErpDataProgressive(startDate, endDate, forceRefresh);
     } else {
-      // For small ranges, check cache first
+      // For small ranges, check cache first (now async)
       if (!forceRefresh) {
-        const cachedData = getCachedData(startDate, endDate);
+        const cachedData = await getCachedData(startDate, endDate);
         if (cachedData && cachedData.length > 0) {
           console.log(`[Cache] Using cached data: ${cachedData.length} records`);
           setRawData(cachedData);
@@ -733,7 +733,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
             period: { from: formatDateForErp(startDate), to: formatDateForErp(endDate) },
           }));
           setIsLoading(false);
-          toast.success(`${cachedData.length} registros carregados do cache`);
+          toast.success(`${cachedData.length} registros carregados do cache (Supabase)`);
           return;
         }
       }

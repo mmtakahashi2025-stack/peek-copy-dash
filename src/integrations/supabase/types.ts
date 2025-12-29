@@ -14,6 +14,75 @@ export type Database = {
   }
   public: {
     Tables: {
+      erp_cache: {
+        Row: {
+          created_at: string
+          data: Json
+          id: string
+          month: number
+          record_count: number
+          updated_at: string
+          user_id: string
+          year: number
+        }
+        Insert: {
+          created_at?: string
+          data: Json
+          id?: string
+          month: number
+          record_count?: number
+          updated_at?: string
+          user_id: string
+          year: number
+        }
+        Update: {
+          created_at?: string
+          data?: Json
+          id?: string
+          month?: number
+          record_count?: number
+          updated_at?: string
+          user_id?: string
+          year?: number
+        }
+        Relationships: []
+      }
+      erp_consolidated_cache: {
+        Row: {
+          created_at: string
+          end_date: string
+          id: string
+          start_date: string
+          total_records: number
+          total_revenue: number
+          unique_sales: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          end_date: string
+          id?: string
+          start_date: string
+          total_records?: number
+          total_revenue?: number
+          unique_sales?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          end_date?: string
+          id?: string
+          start_date?: string
+          total_records?: number
+          total_revenue?: number
+          unique_sales?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       excellence_criteria: {
         Row: {
           code: string
