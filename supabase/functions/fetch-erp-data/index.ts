@@ -378,21 +378,22 @@ serve(async (req) => {
     const shouldPaginate = usePagination && isLargeDateRange(startDate, endDate);
     
     if (shouldPaginate) {
-      // Use monthly pagination with automatic weekly subdivision if limit is hit
+      // Use monthly pagination with parallel requests
       const periods = generateMonthlyPeriods(startDate, endDate);
-      console.log(`[ERP] Usando paginação mensal: ${periods.length} períodos`);
+      console.log(`[ERP] Usando paginação mensal paralela: ${periods.length} períodos`);
       
-      for (const period of periods) {
+      // Helper function to fetch a single month with weekly fallback
+      const fetchMonthData = async (period: { start: string; end: string }): Promise<TransformedSaleRow[]> => {
         const result = await fetchSalesForPeriod(
           erpBaseUrl,
-          authResult.token,
-          authResult.cookies,
+          authResult.token!,
+          authResult.cookies!,
           period.start,
           period.end
         );
         
         if (result.success && result.data) {
-          // Check if we hit the API limit - if so, use weekly pagination for this month
+          // Check if we hit the API limit - if so, use weekly pagination
           if (result.data.length >= ERP_API_LIMIT) {
             console.log(`[ERP] Limite atingido em ${period.start}-${period.end}, usando paginação semanal...`);
             
@@ -400,41 +401,52 @@ serve(async (req) => {
             const monthEnd = parseDate(period.end);
             const weeklyPeriods = generateWeeklyPeriods(monthStart, monthEnd);
             
-            let monthData: TransformedSaleRow[] = [];
-            
-            for (const weekPeriod of weeklyPeriods) {
-              const weekResult = await fetchSalesForPeriod(
-                erpBaseUrl,
-                authResult.token,
-                authResult.cookies,
-                weekPeriod.start,
-                weekPeriod.end
+            // Fetch weeks in parallel (max 2 concurrent to avoid rate limiting)
+            const weekResults: TransformedSaleRow[] = [];
+            for (let i = 0; i < weeklyPeriods.length; i += 2) {
+              const batch = weeklyPeriods.slice(i, i + 2);
+              const batchResults = await Promise.all(
+                batch.map(weekPeriod =>
+                  fetchSalesForPeriod(
+                    erpBaseUrl,
+                    authResult.token!,
+                    authResult.cookies!,
+                    weekPeriod.start,
+                    weekPeriod.end
+                  )
+                )
               );
               
-              if (weekResult.success && weekResult.data) {
-                monthData = [...monthData, ...weekResult.data];
-                
-                // If still hitting limit on weekly, log warning
-                if (weekResult.data.length >= ERP_API_LIMIT) {
-                  console.warn(`[ERP] AVISO: Limite atingido na semana ${weekPeriod.start}-${weekPeriod.end}. Dados podem estar incompletos.`);
+              for (let j = 0; j < batchResults.length; j++) {
+                const weekResult = batchResults[j];
+                if (weekResult.success && weekResult.data) {
+                  weekResults.push(...weekResult.data);
+                  if (weekResult.data.length >= ERP_API_LIMIT) {
+                    console.warn(`[ERP] AVISO: Limite atingido na semana ${batch[j].start}-${batch[j].end}. Dados podem estar incompletos.`);
+                  }
                 }
               }
-              
-              await new Promise(resolve => setTimeout(resolve, 100));
             }
             
-            console.log(`[ERP] Período ${period.start}-${period.end} com paginação semanal: ${monthData.length} registros`);
-            allData = [...allData, ...monthData];
+            console.log(`[ERP] Período ${period.start}-${period.end} com paginação semanal: ${weekResults.length} registros`);
+            return weekResults;
           } else {
-            allData = [...allData, ...result.data];
+            console.log(`[ERP] Período ${period.start}-${period.end}: ${result.data.length} registros`);
+            return result.data;
           }
         } else {
           console.error(`[ERP] Erro no período ${period.start}-${period.end}:`, result.error);
-          // Continue with other periods even if one fails
+          return [];
         }
-        
-        // Small delay between requests to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 100));
+      };
+      
+      // Fetch months in parallel (max 3 concurrent to avoid rate limiting and timeouts)
+      for (let i = 0; i < periods.length; i += 3) {
+        const batch = periods.slice(i, i + 3);
+        const batchResults = await Promise.all(batch.map(fetchMonthData));
+        for (const monthData of batchResults) {
+          allData = [...allData, ...monthData];
+        }
       }
       
       console.log(`[ERP] Total após paginação: ${allData.length} registros`);
