@@ -226,13 +226,17 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     toast.info('Cancelando carregamento...');
   }, []);
 
-  // Cache hook
+  // Cache hook with smart monthly caching
   const { 
     getCachedData, 
     setCachedData, 
     clearAllCache, 
     getCacheInfo, 
-    cacheMeta 
+    cacheMeta,
+    getMonthsToRefresh,
+    getCachedMonths,
+    setMonthData,
+    monthsToRefresh: MONTHS_TO_REFRESH_CONFIG,
   } = useErpCache();
 
   // Fetch ERP credentials from profile using secure RPC function
@@ -423,114 +427,152 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     return periods;
   }, []);
 
-  // Progressive loading with progress indicator
-  const loadErpDataProgressive = useCallback(async (startDate: Date, endDate: Date) => {
-    const periods = generateMonthlyPeriods(startDate, endDate);
+  // Progressive loading with smart caching - only fetches months that need refresh
+  const loadErpDataProgressive = useCallback(async (startDate: Date, endDate: Date, forceRefresh = false) => {
+    // Get months that need refresh vs cached months
+    const monthsToRefresh = forceRefresh 
+      ? generateMonthlyPeriods(startDate, endDate).map(p => ({
+          year: p.start.getFullYear(),
+          month: p.start.getMonth() + 1,
+          label: p.label,
+        }))
+      : getMonthsToRefresh(startDate, endDate);
+    
+    const cachedMonths = forceRefresh ? [] : getCachedMonths(startDate, endDate);
+    
+    // Start with cached data
+    const allData: RawSaleRow[] = [];
+    for (const cached of cachedMonths) {
+      allData.push(...cached.data);
+    }
+    
+    console.log(`[Cache] Using ${cachedMonths.length} cached months, need to fetch ${monthsToRefresh.length} months`);
+    
+    // If no months need refresh, use cache only
+    if (monthsToRefresh.length === 0) {
+      setRawData(allData);
+      setIsConnected(true);
+      setCurrentPeriod({ dateFrom: startDate, dateTo: endDate });
+      setDiagnostic(prev => ({
+        ...prev,
+        lastSuccess: new Date(),
+        lastError: null,
+        recordsLoaded: allData.length,
+        status: 'success',
+      }));
+      toast.success(`${allData.length.toLocaleString('pt-BR')} registros carregados do cache`);
+      return;
+    }
     
     setCancelRequested(false);
     setLoadingProgress({
       isActive: true,
-      totalMonths: periods.length,
+      totalMonths: monthsToRefresh.length,
       completedMonths: 0,
-      currentMonth: periods[0]?.label || null,
-      recordsLoaded: 0,
+      currentMonth: monthsToRefresh[0]?.label || null,
+      recordsLoaded: allData.length,
       errors: [],
       isCancelled: false,
     });
 
-    const allData: RawSaleRow[] = [];
     const errors: string[] = [];
+    const fetchedData: RawSaleRow[] = [];
     
-    // Process months in batches of 3 for parallelism
-    const BATCH_SIZE = 3;
-    
-    for (let i = 0; i < periods.length; i += BATCH_SIZE) {
+    // Process months sequentially to reduce server load
+    for (let i = 0; i < monthsToRefresh.length; i++) {
       // Check for cancellation
       if (cancelRequested) {
         toast.info('Carregamento cancelado');
         break;
       }
       
-      const batch = periods.slice(i, i + BATCH_SIZE);
+      const monthInfo = monthsToRefresh[i];
       
       // Update current month label
       setLoadingProgress(prev => ({
         ...prev,
-        currentMonth: batch.map(p => p.label).join(', '),
+        currentMonth: monthInfo.label,
       }));
       
-      const batchResults = await Promise.all(
-        batch.map(async (period) => {
-          const MAX_RETRIES = 2;
-          let lastError = '';
-          
-          for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            try {
-              const requestBody: Record<string, string> = {
-                startDate: formatDateForErp(period.start),
-                endDate: formatDateForErp(period.end),
-                usePagination: 'false',
-              };
-
-              if (erpCredentials?.email && erpCredentials?.password) {
-                requestBody.email = erpCredentials.email;
-                requestBody.password = erpCredentials.password;
-              }
-
-              const { data: response, error: funcError } = await supabase.functions.invoke('fetch-erp-data', {
-                body: requestBody
-              });
-
-              if (funcError) {
-                throw new Error(funcError.message);
-              }
-
-              if (response?.success === false) {
-                throw new Error(response.error || 'Erro no ERP');
-              }
-
-              return {
-                success: true,
-                data: (response?.data || []) as RawSaleRow[],
-                label: period.label,
-              };
-            } catch (err) {
-              lastError = err instanceof Error ? err.message : 'Erro';
-              console.warn(`[ERP] ${period.label} tentativa ${attempt + 1}/${MAX_RETRIES + 1} falhou:`, lastError);
-              
-              // Wait before retry (exponential backoff)
-              if (attempt < MAX_RETRIES) {
-                await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
-              }
-            }
-          }
-          
-          return {
-            success: false,
-            data: [] as RawSaleRow[],
-            label: period.label,
-            error: lastError,
+      // Calculate period dates for this month
+      const periodStart = new Date(monthInfo.year, monthInfo.month - 1, 1);
+      const periodEnd = new Date(monthInfo.year, monthInfo.month, 0);
+      
+      // Adjust start/end if this is first/last month in range
+      const actualStart = periodStart < startDate ? startDate : periodStart;
+      const actualEnd = periodEnd > endDate ? endDate : periodEnd;
+      
+      const MAX_RETRIES = 2;
+      let lastError = '';
+      let monthData: RawSaleRow[] = [];
+      let success = false;
+      
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const requestBody: Record<string, string> = {
+            startDate: formatDateForErp(actualStart),
+            endDate: formatDateForErp(actualEnd),
+            usePagination: 'false',
           };
-        })
-      );
 
-      for (const result of batchResults) {
-        if (result.success) {
-          allData.push(...result.data);
-        } else if (result.error) {
-          errors.push(`${result.label}: ${result.error}`);
+          if (erpCredentials?.email && erpCredentials?.password) {
+            requestBody.email = erpCredentials.email;
+            requestBody.password = erpCredentials.password;
+          }
+
+          const { data: response, error: funcError } = await supabase.functions.invoke('fetch-erp-data', {
+            body: requestBody
+          });
+
+          if (funcError) {
+            throw new Error(funcError.message);
+          }
+
+          if (response?.success === false) {
+            throw new Error(response.error || 'Erro no ERP');
+          }
+
+          monthData = (response?.data || []) as RawSaleRow[];
+          success = true;
+          
+          // Save this month to cache immediately
+          setMonthData(monthInfo.year, monthInfo.month, monthData);
+          
+          break;
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : 'Erro';
+          console.warn(`[ERP] ${monthInfo.label} tentativa ${attempt + 1}/${MAX_RETRIES + 1} falhou:`, lastError);
+          
+          // Wait before retry (exponential backoff)
+          if (attempt < MAX_RETRIES) {
+            await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+          }
         }
+      }
+      
+      if (success) {
+        fetchedData.push(...monthData);
+      } else {
+        errors.push(`${monthInfo.label}: ${lastError}`);
       }
 
       setLoadingProgress(prev => ({
         ...prev,
-        completedMonths: Math.min(i + BATCH_SIZE, periods.length),
-        recordsLoaded: allData.length,
+        completedMonths: i + 1,
+        recordsLoaded: allData.length + fetchedData.length,
         errors,
       }));
+      
+      // Small delay between months to reduce server load
+      if (i < monthsToRefresh.length - 1) {
+        await new Promise(r => setTimeout(r, 500));
+      }
     }
+    
+    // Combine cached and fetched data
+    const combinedData = [...allData, ...fetchedData];
 
-    setRawData(allData);
+    setRawData(combinedData);
     setIsConnected(true);
     setCurrentPeriod({ dateFrom: startDate, dateTo: endDate });
     
@@ -538,22 +580,14 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       ...prev,
       lastSuccess: new Date(),
       lastError: errors.length > 0 ? errors.join('; ') : null,
-      recordsLoaded: allData.length,
-      status: errors.length === periods.length ? 'error' : 'success',
+      recordsLoaded: combinedData.length,
+      status: errors.length === monthsToRefresh.length ? 'error' : 'success',
     }));
 
     const MAX_ROWS_BACKGROUND_OPS = 50000;
-    if (allData.length <= MAX_ROWS_BACKGROUND_OPS) {
+    if (combinedData.length <= MAX_ROWS_BACKGROUND_OPS) {
       setTimeout(() => {
-        try {
-          setCachedData(startDate, endDate, allData);
-        } catch (e) {
-          console.error('[Cache] Failed to persist cache', e);
-        }
-      }, 0);
-
-      setTimeout(() => {
-        void broadcastUpdate(allData);
+        void broadcastUpdate(combinedData);
       }, 0);
     }
 
@@ -563,14 +597,23 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
 
     setIsLoading(false);
     
+    const cachedCount = allData.length;
+    const fetchedCount = fetchedData.length;
+    
     if (errors.length === 0) {
-      toast.success(`${allData.length.toLocaleString('pt-BR')} registros carregados do ERP`);
-    } else if (errors.length < periods.length) {
-      toast.warning(`${allData.length.toLocaleString('pt-BR')} registros carregados (${errors.length} meses com erro)`);
+      if (cachedCount > 0 && fetchedCount > 0) {
+        toast.success(`${combinedData.length.toLocaleString('pt-BR')} registros (${cachedCount.toLocaleString('pt-BR')} do cache + ${fetchedCount.toLocaleString('pt-BR')} do ERP)`);
+      } else if (cachedCount > 0) {
+        toast.success(`${cachedCount.toLocaleString('pt-BR')} registros carregados do cache`);
+      } else {
+        toast.success(`${fetchedCount.toLocaleString('pt-BR')} registros carregados do ERP`);
+      }
+    } else if (errors.length < monthsToRefresh.length) {
+      toast.warning(`${combinedData.length.toLocaleString('pt-BR')} registros carregados (${errors.length} meses com erro)`);
     } else {
       toast.error('Falha ao carregar dados do ERP');
     }
-  }, [erpCredentials, broadcastUpdate, setCachedData, generateMonthlyPeriods]);
+  }, [erpCredentials, broadcastUpdate, generateMonthlyPeriods, getMonthsToRefresh, getCachedMonths, setMonthData, cancelRequested]);
 
   // Single request loading (for small date ranges)
   const loadErpDataSingle = useCallback(async (startDate: Date, endDate: Date) => {
@@ -655,27 +698,6 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     const startDate = dateFrom || new Date(now.getFullYear(), now.getMonth(), 1);
     const endDate = dateTo || now;
     
-    // Check cache first (unless force refresh)
-    if (!forceRefresh) {
-      const cachedData = getCachedData(startDate, endDate);
-      if (cachedData && cachedData.length > 0) {
-        console.log(`[Cache] Using cached data: ${cachedData.length} records`);
-        setRawData(cachedData);
-        setIsConnected(true);
-        setCurrentPeriod({ dateFrom: startDate, dateTo: endDate });
-        setDiagnostic(prev => ({
-          ...prev,
-          lastSuccess: new Date(),
-          lastError: null,
-          recordsLoaded: cachedData.length,
-          status: 'success',
-          period: { from: formatDateForErp(startDate), to: formatDateForErp(endDate) },
-        }));
-        toast.success(`${cachedData.length} registros carregados do cache`);
-        return;
-      }
-    }
-    
     setIsLoading(true);
     setError(null);
     
@@ -691,8 +713,30 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     const isLargeRange = diffMonths >= 1;
 
     if (isLargeRange) {
-      await loadErpDataProgressive(startDate, endDate);
+      // Use smart progressive loading with cache awareness
+      await loadErpDataProgressive(startDate, endDate, forceRefresh);
     } else {
+      // For small ranges, check cache first
+      if (!forceRefresh) {
+        const cachedData = getCachedData(startDate, endDate);
+        if (cachedData && cachedData.length > 0) {
+          console.log(`[Cache] Using cached data: ${cachedData.length} records`);
+          setRawData(cachedData);
+          setIsConnected(true);
+          setCurrentPeriod({ dateFrom: startDate, dateTo: endDate });
+          setDiagnostic(prev => ({
+            ...prev,
+            lastSuccess: new Date(),
+            lastError: null,
+            recordsLoaded: cachedData.length,
+            status: 'success',
+            period: { from: formatDateForErp(startDate), to: formatDateForErp(endDate) },
+          }));
+          setIsLoading(false);
+          toast.success(`${cachedData.length} registros carregados do cache`);
+          return;
+        }
+      }
       await loadErpDataSingle(startDate, endDate);
     }
   }, [getCachedData, loadErpDataProgressive, loadErpDataSingle]);
