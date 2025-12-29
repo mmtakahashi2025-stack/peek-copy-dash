@@ -10,6 +10,7 @@ import Auth from "./pages/Auth";
 import Targets from "./pages/Targets";
 import ExcellenceStandard from "./pages/ExcellenceStandard";
 import Leads from "./pages/Leads";
+import UserRoles from "./pages/UserRoles";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -29,6 +30,7 @@ function App() {
                 <Route path="/metas" element={<Targets />} />
                 <Route path="/padrao-excelencia" element={<ExcellenceStandard />} />
                 <Route path="/leads" element={<Leads />} />
+                <Route path="/usuarios" element={<UserRoles />} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>

@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { LogOut, Target, Award, Users, Menu, LayoutDashboard } from 'lucide-react';
+import { useUserRole } from '@/hooks/useUserRole';
+import { LogOut, Target, Award, Users, Menu, LayoutDashboard, UserCog } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import comboLogo from '@/assets/combo-iguassu-logo.png';
 import { SheetConfigDialog } from './SheetConfigDialog';
@@ -17,6 +18,7 @@ const menuItems = [
 
 export function DashboardHeader() {
   const { user, signOut } = useAuth();
+  const { isAdmin } = useUserRole();
   const [open, setOpen] = useState(false);
   const isMobile = useIsMobile();
   const location = useLocation();
@@ -53,6 +55,19 @@ export function DashboardHeader() {
               </Button>
             );
           })}
+          {isAdmin && (
+            <Button
+              variant={location.pathname === '/usuarios' ? 'secondary' : 'ghost'}
+              size="sm"
+              asChild
+              className="gap-2"
+            >
+              <Link to="/usuarios">
+                <UserCog className="h-4 w-4" />
+                Usuários
+              </Link>
+            </Button>
+          )}
           <SheetConfigDialog />
           <span className="text-sm text-muted-foreground">
             {user?.email}
@@ -93,6 +108,20 @@ export function DashboardHeader() {
                     </Button>
                   );
                 })}
+                
+                {isAdmin && (
+                  <Button
+                    variant={location.pathname === '/usuarios' ? 'secondary' : 'ghost'}
+                    className="justify-start gap-3 h-12"
+                    asChild
+                    onClick={handleNavigate}
+                  >
+                    <Link to="/usuarios">
+                      <UserCog className="h-5 w-5" />
+                      Usuários
+                    </Link>
+                  </Button>
+                )}
                 
                 <div className="border-t my-4" />
                 

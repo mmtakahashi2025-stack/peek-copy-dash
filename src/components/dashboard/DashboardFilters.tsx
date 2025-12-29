@@ -4,19 +4,22 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
-import { CalendarIcon, ArrowLeftRight, Search, Loader2, Building2, Users, ChevronDown, RefreshCw } from 'lucide-react';
+import { CalendarIcon, ArrowLeftRight, Search, Loader2, Building2, Users, ChevronDown, RefreshCw, ShieldCheck } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays, subMonths, startOfYear, endOfYear, subYears } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { useSheetData } from '@/contexts/SheetDataContext';
+import { useUserRole } from '@/hooks/useUserRole';
 import { DateRange } from 'react-day-picker';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { CacheInfoButton } from './CacheInfoButton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Badge } from '@/components/ui/badge';
 
 type DatePreset = {
   label: string;
   getValue: () => DateRange;
+  adminOnly?: boolean;
 };
 
 const datePresets: DatePreset[] = [
@@ -28,6 +31,11 @@ const datePresets: DatePreset[] = [
   { label: 'Mês', getValue: () => ({ from: startOfMonth(new Date()), to: endOfMonth(new Date()) }) },
   { label: 'Mês anterior', getValue: () => ({ from: startOfMonth(subMonths(new Date(), 1)), to: endOfMonth(subMonths(new Date(), 1)) }) },
   { label: 'Ano', getValue: () => ({ from: startOfYear(new Date()), to: endOfYear(new Date()) }) },
+  // Admin-only presets for historical data
+  { label: '6 meses', getValue: () => ({ from: subMonths(new Date(), 6), to: new Date() }), adminOnly: true },
+  { label: '12 meses', getValue: () => ({ from: subMonths(new Date(), 12), to: new Date() }), adminOnly: true },
+  { label: 'Ano anterior', getValue: () => ({ from: startOfYear(subYears(new Date(), 1)), to: endOfYear(subYears(new Date(), 1)) }), adminOnly: true },
+  { label: '2 anos', getValue: () => ({ from: subYears(new Date(), 2), to: new Date() }), adminOnly: true },
 ];
 
 interface DashboardFiltersProps {
@@ -46,6 +54,7 @@ interface DashboardFiltersProps {
 
 export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
   const { filiais, colaboradores: allColaboradores, loadErpData, getCacheInfo } = useSheetData();
+  const { isAdmin } = useUserRole();
   
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: startOfMonth(new Date()),
@@ -160,17 +169,23 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
         <PopoverContent className="w-auto p-0 z-50 bg-popover" align="start">
           <div className="flex">
             <div className="border-r p-1 flex flex-col gap-0.5">
-              {datePresets.map((preset) => (
-                <Button
-                  key={preset.label}
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 justify-start text-xs font-normal"
-                  onClick={() => setDateRange(preset.getValue())}
-                >
-                  {preset.label}
-                </Button>
-              ))}
+              {datePresets
+                .filter(preset => !preset.adminOnly || isAdmin)
+                .map((preset) => (
+                  <Button
+                    key={preset.label}
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "h-7 px-2 justify-start text-xs font-normal",
+                      preset.adminOnly && "text-primary"
+                    )}
+                    onClick={() => setDateRange(preset.getValue())}
+                  >
+                    {preset.adminOnly && <ShieldCheck className="h-3 w-3 mr-1" />}
+                    {preset.label}
+                  </Button>
+                ))}
             </div>
             <Calendar
               mode="range"
