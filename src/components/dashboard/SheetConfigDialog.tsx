@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import {
   Dialog,
   DialogContent,
@@ -8,9 +10,17 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Settings, Loader2, CheckCircle2, AlertCircle, RefreshCw, Database, Clock, FileText, Activity } from 'lucide-react';
+import { Calendar } from '@/components/ui/calendar';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { Loader2, CheckCircle2, AlertCircle, RefreshCw, Database, Clock, FileText, Activity, CalendarIcon } from 'lucide-react';
 import { useSheetData } from '@/contexts/SheetDataContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { cn } from '@/lib/utils';
+import { Label } from '@/components/ui/label';
 
 function formatDateTime(date: Date | null): string {
   if (!date) return '--';
@@ -27,13 +37,18 @@ function formatDateTime(date: Date | null): string {
 export function SheetConfigDialog() {
   const [open, setOpen] = useState(false);
   const { rawData, isLoading, error, isConnected, diagnostic, loadErpData, refreshData } = useSheetData();
+  
+  // Date range state - default to current month
+  const now = new Date();
+  const [dateFrom, setDateFrom] = useState<Date>(new Date(now.getFullYear(), now.getMonth(), 1));
+  const [dateTo, setDateTo] = useState<Date>(now);
 
   const handleRefresh = async () => {
     await refreshData();
   };
 
   const handleLoadData = async () => {
-    await loadErpData();
+    await loadErpData(dateFrom, dateTo);
   };
 
   const hasData = rawData.length > 0;
@@ -132,6 +147,70 @@ export function SheetConfigDialog() {
                     <span className="text-sm">Não conectado</span>
                   </div>
                 )}
+              </div>
+
+              {/* Date Range Selection */}
+              <div className="p-4 bg-muted/50 rounded-lg space-y-3">
+                <div className="flex items-center gap-2">
+                  <CalendarIcon className="h-5 w-5 text-primary" />
+                  <span className="font-medium">Período de Consulta</span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Data Início</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "w-full justify-start text-left font-normal",
+                            !dateFrom && "text-muted-foreground"
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {dateFrom ? format(dateFrom, "dd/MM/yyyy", { locale: ptBR }) : <span>Selecione</span>}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0 z-50" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={dateFrom}
+                          onSelect={(date) => date && setDateFrom(date)}
+                          initialFocus
+                          className={cn("p-3 pointer-events-auto")}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Data Fim</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "w-full justify-start text-left font-normal",
+                            !dateTo && "text-muted-foreground"
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {dateTo ? format(dateTo, "dd/MM/yyyy", { locale: ptBR }) : <span>Selecione</span>}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0 z-50" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={dateTo}
+                          onSelect={(date) => date && setDateTo(date)}
+                          initialFocus
+                          className={cn("p-3 pointer-events-auto")}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
               </div>
 
               <div className="flex gap-2">
