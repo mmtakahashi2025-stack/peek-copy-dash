@@ -5,3 +5,5 @@ project_id = "vpxbaxjwppiyodjzqsqo"
 # We still enforce authentication inside the function via supabaseClient.auth.getUser().
 verify_jwt = false
 
+[functions.fetch-erp-data]
+verify_jwt = false
