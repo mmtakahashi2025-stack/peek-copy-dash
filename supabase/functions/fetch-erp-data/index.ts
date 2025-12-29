@@ -131,6 +131,10 @@ function formatDate(date: Date): string {
 // ERP API limit - if we hit this, we need finer pagination
 const ERP_API_LIMIT = 5000;
 
+// Concurrency limits (tuned for performance vs rate limiting)
+const MONTH_CONCURRENCY = 6;
+const WEEK_CONCURRENCY = 4;
+
 // Generate weekly periods for a given month
 function generateWeeklyPeriods(monthStart: Date, monthEnd: Date): Array<{ start: string; end: string }> {
   const periods: Array<{ start: string; end: string }> = [];
@@ -401,10 +405,10 @@ serve(async (req) => {
             const monthEnd = parseDate(period.end);
             const weeklyPeriods = generateWeeklyPeriods(monthStart, monthEnd);
             
-            // Fetch weeks in parallel (max 2 concurrent to avoid rate limiting)
+            // Fetch weeks in parallel (limited concurrency to avoid rate limiting)
             const weekResults: TransformedSaleRow[] = [];
-            for (let i = 0; i < weeklyPeriods.length; i += 2) {
-              const batch = weeklyPeriods.slice(i, i + 2);
+            for (let i = 0; i < weeklyPeriods.length; i += WEEK_CONCURRENCY) {
+              const batch = weeklyPeriods.slice(i, i + WEEK_CONCURRENCY);
               const batchResults = await Promise.all(
                 batch.map(weekPeriod =>
                   fetchSalesForPeriod(
@@ -440,12 +444,12 @@ serve(async (req) => {
         }
       };
       
-      // Fetch months in parallel (max 3 concurrent to avoid rate limiting and timeouts)
-      for (let i = 0; i < periods.length; i += 3) {
-        const batch = periods.slice(i, i + 3);
+      // Fetch months in parallel (limited concurrency to avoid rate limiting/timeouts)
+      for (let i = 0; i < periods.length; i += MONTH_CONCURRENCY) {
+        const batch = periods.slice(i, i + MONTH_CONCURRENCY);
         const batchResults = await Promise.all(batch.map(fetchMonthData));
         for (const monthData of batchResults) {
-          allData = [...allData, ...monthData];
+          allData.push(...monthData);
         }
       }
       
