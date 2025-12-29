@@ -77,11 +77,21 @@ export interface DateFilter {
   dateTo?: Date;
 }
 
+export interface DiagnosticInfo {
+  lastAttempt: Date | null;
+  lastSuccess: Date | null;
+  lastError: string | null;
+  recordsLoaded: number;
+  period: { from: string; to: string } | null;
+  status: 'idle' | 'loading' | 'success' | 'error';
+}
+
 interface SheetDataContextType {
   rawData: RawSaleRow[];
   isLoading: boolean;
   error: string | null;
   isConnected: boolean;
+  diagnostic: DiagnosticInfo;
   filiais: FilialData[];
   colaboradores: string[];
   getKpis: (filialId: string, dateFilter?: DateFilter, leadsRecebidos?: number) => KpiData[];
@@ -137,6 +147,14 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [currentPeriod, setCurrentPeriod] = useState<{ dateFrom: Date; dateTo: Date } | null>(null);
+  const [diagnostic, setDiagnostic] = useState<DiagnosticInfo>({
+    lastAttempt: null,
+    lastSuccess: null,
+    lastError: null,
+    recordsLoaded: 0,
+    period: null,
+    status: 'idle',
+  });
 
   // Fetch KPI targets from database
   useEffect(() => {
@@ -292,12 +310,19 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   const loadErpData = useCallback(async (dateFrom?: Date, dateTo?: Date, broadcast = true) => {
     setIsLoading(true);
     setError(null);
+    
+    const now = new Date();
+    const startDate = dateFrom || new Date(now.getFullYear(), now.getMonth(), 1);
+    const endDate = dateTo || now;
+    
+    setDiagnostic(prev => ({
+      ...prev,
+      lastAttempt: new Date(),
+      status: 'loading',
+      period: { from: formatDateForErp(startDate), to: formatDateForErp(endDate) },
+    }));
 
     try {
-      const now = new Date();
-      const startDate = dateFrom || new Date(now.getFullYear(), now.getMonth(), 1);
-      const endDate = dateTo || now;
-
       const { data: response, error: funcError } = await supabase.functions.invoke('fetch-erp-data', {
         body: { 
           startDate: formatDateForErp(startDate),
@@ -318,6 +343,14 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       setIsConnected(true);
       setCurrentPeriod({ dateFrom: startDate, dateTo: endDate });
       
+      setDiagnostic(prev => ({
+        ...prev,
+        lastSuccess: new Date(),
+        lastError: null,
+        recordsLoaded: data.length,
+        status: 'success',
+      }));
+      
       // Save to sessionStorage
       sessionStorage.setItem(ERP_DATA_KEY, JSON.stringify(data));
       sessionStorage.setItem(ERP_PERIOD_KEY, JSON.stringify({ dateFrom: startDate, dateTo: endDate }));
@@ -331,6 +364,11 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
       setError(errorMessage);
+      setDiagnostic(prev => ({
+        ...prev,
+        lastError: errorMessage,
+        status: 'error',
+      }));
       toast.error(errorMessage);
     } finally {
       setIsLoading(false);
@@ -623,6 +661,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       isLoading,
       error,
       isConnected,
+      diagnostic,
       filiais,
       colaboradores,
       getKpis,
