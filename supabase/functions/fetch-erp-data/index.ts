@@ -161,15 +161,29 @@ serve(async (req) => {
 
     // Step 2: Fetch sales data using the vendasEmissorExpandido endpoint
     const salesUrl = `${erpUrl}/api/vendas/vendasEmissorExpandido`;
+    
+    // Build request headers matching the original axios example
+    const salesHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Authorization': authToken,
+      'User-Agent': 'Mozilla/5.0 (compatible; LovableBot/1.0)',
+    };
+    
+    // Add cookies if available
+    if (cookieHeader) {
+      salesHeaders['Cookie'] = cookieHeader;
+    }
+    
+    console.log('Request headers (without auth token):', JSON.stringify({
+      ...salesHeaders,
+      'Authorization': '[REDACTED]',
+    }));
+    console.log('Request body:', JSON.stringify({ StartDate: startDate, EndDate: endDate }));
 
     const salesResponse = await fetch(salesUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'Authorization': authToken,
-        ...(cookieHeader ? { 'Cookie': cookieHeader } : {}),
-      },
+      headers: salesHeaders,
       body: JSON.stringify({
         StartDate: startDate,
         EndDate: endDate,
