@@ -86,6 +86,27 @@ export interface DiagnosticInfo {
   status: 'idle' | 'loading' | 'success' | 'error';
 }
 
+export interface LoginTestResult {
+  success: boolean;
+  loginSuccess?: boolean;
+  cookiesComplete?: boolean;
+  user?: {
+    name: string;
+    email: string;
+    id: number;
+    empresaId: number;
+  };
+  session?: {
+    hasToken: boolean;
+    tokenPreview: string;
+    hasERPSession: boolean;
+    hasDeviceId: boolean;
+    setCookieCount: number;
+  };
+  message?: string;
+  error?: string;
+}
+
 interface SheetDataContextType {
   rawData: RawSaleRow[];
   isLoading: boolean;
@@ -100,6 +121,7 @@ interface SheetDataContextType {
   getProdutos: (filialId: string) => ProdutoData[];
   loadErpData: (dateFrom?: Date, dateTo?: Date) => Promise<void>;
   refreshData: () => Promise<void>;
+  testErpLogin: () => Promise<LoginTestResult>;
   fetchExcellencePercentage: (dateFilter?: DateFilter) => Promise<number | null>;
   fetchLeadsTotal: (dateFilter?: DateFilter) => Promise<number | null>;
 }
@@ -388,6 +410,20 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     }
   }, [currentPeriod, loadErpData]);
 
+  const testErpLogin = useCallback(async (): Promise<LoginTestResult> => {
+    try {
+      const { data: response, error: funcError } = await supabase.functions.invoke('test-erp-login');
+
+      if (funcError) {
+        return { success: false, error: funcError.message };
+      }
+
+      return response as LoginTestResult;
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Erro desconhecido' };
+    }
+  }, []);
+
   // Get unique filiais
   const filiais: FilialData[] = [
     { id: 'todas', nome: 'Todas as Filiais' },
@@ -675,6 +711,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       getProdutos,
       loadErpData,
       refreshData,
+      testErpLogin,
       fetchExcellencePercentage,
       fetchLeadsTotal,
     }}>
