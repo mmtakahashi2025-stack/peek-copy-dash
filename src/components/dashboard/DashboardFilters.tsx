@@ -4,13 +4,15 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
-import { CalendarIcon, ArrowLeftRight, Search, Loader2, Building2, Users, ChevronDown } from 'lucide-react';
+import { CalendarIcon, ArrowLeftRight, Search, Loader2, Building2, Users, ChevronDown, RefreshCw } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays, subMonths, startOfYear, endOfYear, subYears } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { useSheetData } from '@/contexts/SheetDataContext';
 import { DateRange } from 'react-day-picker';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { CacheInfoButton } from './CacheInfoButton';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 type DatePreset = {
   label: string;
@@ -43,7 +45,7 @@ interface DashboardFiltersProps {
 }
 
 export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
-  const { filiais, colaboradores: allColaboradores } = useSheetData();
+  const { filiais, colaboradores: allColaboradores, loadErpData, getCacheInfo } = useSheetData();
   
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: startOfMonth(new Date()),
@@ -368,6 +370,32 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
         {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
         {isLoading ? 'Buscando...' : 'Filtrar'}
       </Button>
+
+      {/* Force Refresh Button */}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button 
+              variant="outline" 
+              size="icon"
+              onClick={() => {
+                if (dateRange?.from && dateRange?.to) {
+                  loadErpData(dateRange.from, dateRange.to, true);
+                }
+              }}
+              disabled={isLoading}
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Atualizar dados (ignorar cache)</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+
+      {/* Cache Info Button */}
+      <CacheInfoButton />
     </div>
   );
 }

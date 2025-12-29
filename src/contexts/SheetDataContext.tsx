@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { useErpCache } from '@/hooks/useErpCache';
 
 // Types for raw sale data (from ERP or sheet)
 export interface RawSaleRow {
@@ -113,6 +114,13 @@ export interface UserErpCredentials {
   hasPassword: boolean;
 }
 
+interface CacheMeta {
+  totalEntries: number;
+  totalSizeMB: number;
+  oldestEntry: Date | null;
+  newestEntry: Date | null;
+}
+
 interface SheetDataContextType {
   rawData: RawSaleRow[];
   isLoading: boolean;
@@ -122,16 +130,19 @@ interface SheetDataContextType {
   filiais: FilialData[];
   colaboradores: string[];
   erpCredentials: UserErpCredentials | null;
+  cacheMeta: CacheMeta;
   getKpis: (filialId: string, dateFilter?: DateFilter, leadsRecebidos?: number) => KpiData[];
   getColaboradores: (filialId: string, colaboradorId?: string) => ColaboradorData[];
   getEvolucao: () => EvolucaoData[];
   getProdutos: (filialId: string) => ProdutoData[];
-  loadErpData: (dateFrom?: Date, dateTo?: Date) => Promise<void>;
+  loadErpData: (dateFrom?: Date, dateTo?: Date, forceRefresh?: boolean) => Promise<void>;
   refreshData: () => Promise<void>;
   testErpLogin: () => Promise<LoginTestResult>;
   fetchExcellencePercentage: (dateFilter?: DateFilter) => Promise<number | null>;
   fetchLeadsTotal: (dateFilter?: DateFilter) => Promise<number | null>;
   refreshErpCredentials: () => Promise<void>;
+  clearCache: () => void;
+  getCacheInfo: (dateFrom: Date, dateTo: Date) => { isCached: boolean; cachedAt: Date | null; recordCount: number };
 }
 
 const SheetDataContext = createContext<SheetDataContextType | undefined>(undefined);
@@ -185,6 +196,15 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     period: null,
     status: 'idle',
   });
+
+  // Cache hook
+  const { 
+    getCachedData, 
+    setCachedData, 
+    clearAllCache, 
+    getCacheInfo, 
+    cacheMeta 
+  } = useErpCache();
 
   // Fetch ERP credentials from profile using secure RPC function
   const refreshErpCredentials = useCallback(async () => {
@@ -354,13 +374,34 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const loadErpData = useCallback(async (dateFrom?: Date, dateTo?: Date, broadcast = true) => {
-    setIsLoading(true);
-    setError(null);
-    
+  const loadErpData = useCallback(async (dateFrom?: Date, dateTo?: Date, forceRefresh = false) => {
     const now = new Date();
     const startDate = dateFrom || new Date(now.getFullYear(), now.getMonth(), 1);
     const endDate = dateTo || now;
+    
+    // Check cache first (unless force refresh)
+    if (!forceRefresh) {
+      const cachedData = getCachedData(startDate, endDate);
+      if (cachedData && cachedData.length > 0) {
+        console.log(`[Cache] Using cached data: ${cachedData.length} records`);
+        setRawData(cachedData);
+        setIsConnected(true);
+        setCurrentPeriod({ dateFrom: startDate, dateTo: endDate });
+        setDiagnostic(prev => ({
+          ...prev,
+          lastSuccess: new Date(),
+          lastError: null,
+          recordsLoaded: cachedData.length,
+          status: 'success',
+          period: { from: formatDateForErp(startDate), to: formatDateForErp(endDate) },
+        }));
+        toast.success(`${cachedData.length} registros carregados do cache`);
+        return;
+      }
+    }
+    
+    setIsLoading(true);
+    setError(null);
     
     setDiagnostic(prev => ({
       ...prev,
@@ -410,6 +451,9 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       setIsConnected(true);
       setCurrentPeriod({ dateFrom: startDate, dateTo: endDate });
       
+      // Save to cache
+      setCachedData(startDate, endDate, data);
+      
       setDiagnostic(prev => ({
         ...prev,
         lastSuccess: new Date(),
@@ -418,12 +462,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         status: 'success',
       }));
       
-      // Note: No longer caching in sessionStorage for security
-      
       // Broadcast to other users
-      if (broadcast) {
-        await broadcastUpdate(data);
-      }
+      await broadcastUpdate(data);
       
       toast.success(`${data.length} registros carregados do ERP`);
     } catch (err) {
@@ -438,7 +478,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [broadcastUpdate, erpCredentials]);
+  }, [broadcastUpdate, erpCredentials, getCachedData, setCachedData]);
 
   const refreshData = useCallback(async () => {
     if (currentPeriod) {
@@ -744,6 +784,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       filiais,
       colaboradores,
       erpCredentials,
+      cacheMeta,
       getKpis,
       getColaboradores,
       getEvolucao,
@@ -754,6 +795,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       fetchExcellencePercentage,
       fetchLeadsTotal,
       refreshErpCredentials,
+      clearCache: clearAllCache,
+      getCacheInfo,
     }}>
       {children}
     </SheetDataContext.Provider>
