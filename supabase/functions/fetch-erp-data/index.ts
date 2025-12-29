@@ -93,40 +93,42 @@ function transformERPData(erpData: Record<string, ERPSaleItem>): TransformedSale
   }));
 }
 
-// Generate a stable device_id for the session
-function generateDeviceId(): string {
-  return 'lovable-erp-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
-}
+type SessionCookies = {
+  ERPSession?: string;
+  device_id?: string;
+};
 
-// Extract cookies from Set-Cookie header(s)
-function extractCookies(response: Response): string {
-  const cookies: string[] = [];
-  
-  // Try getSetCookie method (Deno/modern browsers)
+function extractSessionCookies(response: Response): {
+  cookies: SessionCookies;
+  cookieHeader: string;
+  setCookieHeaders: string[];
+} {
   const setCookieList =
     (response.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
-  
-  if (setCookieList.length > 0) {
-    for (const c of setCookieList) {
-      const cookiePart = c.split(';')[0].trim();
-      if (cookiePart) cookies.push(cookiePart);
+  const rawSetCookie = response.headers.get('set-cookie');
+
+  const setCookieHeaders = setCookieList.length ? setCookieList : rawSetCookie ? [rawSetCookie] : [];
+
+  const getCookieValue = (name: keyof SessionCookies): string | undefined => {
+    for (const c of setCookieHeaders) {
+      const match = c.match(new RegExp(`${name}=([^;]+)`));
+      if (match?.[1]) return match[1];
     }
-  } else {
-    // Fallback: check set-cookie header
-    const rawSetCookie = response.headers.get('set-cookie');
-    if (rawSetCookie) {
-      // Handle potential multiple cookies in one header (comma separated)
-      const parts = rawSetCookie.split(',');
-      for (const part of parts) {
-        const cookiePart = part.split(';')[0].trim();
-        if (cookiePart && cookiePart.includes('=')) {
-          cookies.push(cookiePart);
-        }
-      }
-    }
-  }
-  
-  return cookies.join('; ');
+    return undefined;
+  };
+
+  const ERPSession = getCookieValue('ERPSession');
+  const device_id = getCookieValue('device_id');
+
+  const parts: string[] = [];
+  if (ERPSession) parts.push(`ERPSession=${ERPSession}`);
+  if (device_id) parts.push(`device_id=${device_id}`);
+
+  return {
+    cookies: { ERPSession, device_id },
+    cookieHeader: parts.join('; '),
+    setCookieHeaders,
+  };
 }
 
 serve(async (req) => {
@@ -166,24 +168,20 @@ serve(async (req) => {
   console.log(`[ERP] Buscando vendas de ${startDate} até ${endDate}`);
 
   try {
-    // Generate device_id for this session
-    const deviceId = generateDeviceId();
-    
     // ============================================
     // STEP 1: Authentication (GET with query params)
-    // Spec: no Authorization header, send device_id cookie
+    // IMPORTANT: Do NOT generate or override cookies/device_id.
+    // We capture ERPSession + device_id returned by the ERP and reuse them.
     // ============================================
     const loginUrl = `${erpBaseUrl}/api/auth/login?email=${encodeURIComponent(erpEmail)}&password=${encodeURIComponent(erpPassword)}`;
-    
+
     console.log('[ERP] Autenticando...');
-    console.log('[ERP] Device ID:', deviceId);
-    
+
     const loginResponse = await fetch(loginUrl, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Cookie': `device_id=${deviceId}`,
       },
     });
 
@@ -210,31 +208,35 @@ serve(async (req) => {
     }
 
     const jwtToken = loginResult.data.token;
-    const serverCookies = extractCookies(loginResponse);
-    
-    // Build full cookie string: server cookies + device_id
-    const fullCookies = serverCookies 
-      ? `${serverCookies}; device_id=${deviceId}`
-      : `device_id=${deviceId}`;
-    
+    const { cookies: sessionCookies, cookieHeader, setCookieHeaders } = extractSessionCookies(loginResponse);
+
     console.log('[ERP] Login OK. Usuário:', loginResult.data.user?.name);
     console.log('[ERP] Token JWT (primeiros 50 chars):', jwtToken.substring(0, 50) + '...');
-    console.log('[ERP] Cookies do servidor:', serverCookies || 'Nenhum');
-    console.log('[ERP] Cookies finais:', fullCookies);
+    console.log('[ERP] Cookies capturados:', JSON.stringify(sessionCookies));
+
+    if (!sessionCookies.ERPSession || !sessionCookies.device_id) {
+      console.warn('[ERP] Cookies incompletos no login. Set-Cookie:', JSON.stringify(setCookieHeaders));
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Sessão do ERP incompleta: ERPSession/device_id ausentes no login',
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // ============================================
     // STEP 2: Fetch Sales (POST with Bearer token)
-    // Spec: Authorization: Bearer + Cookie: ERPSession + device_id
+    // Spec: Authorization: Bearer + Cookie: ERPSession + device_id (same as login)
     // ============================================
     const salesUrl = `${erpBaseUrl}/api/vendas/vendasEmissorExpandido`;
-    
-    // Build headers - some APIs need different auth patterns
+
     const salesHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       'Authorization': `Bearer ${jwtToken}`,
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Cookie': fullCookies,
+      'Cookie': cookieHeader,
     };
 
     const salesBody = {
