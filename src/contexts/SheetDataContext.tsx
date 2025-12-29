@@ -442,43 +442,56 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       
       const batchResults = await Promise.all(
         batch.map(async (period) => {
-          try {
-            const requestBody: Record<string, string> = {
-              startDate: formatDateForErp(period.start),
-              endDate: formatDateForErp(period.end),
-              usePagination: 'false',
-            };
+          const MAX_RETRIES = 2;
+          let lastError = '';
+          
+          for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            try {
+              const requestBody: Record<string, string> = {
+                startDate: formatDateForErp(period.start),
+                endDate: formatDateForErp(period.end),
+                usePagination: 'false',
+              };
 
-            if (erpCredentials?.email && erpCredentials?.password) {
-              requestBody.email = erpCredentials.email;
-              requestBody.password = erpCredentials.password;
+              if (erpCredentials?.email && erpCredentials?.password) {
+                requestBody.email = erpCredentials.email;
+                requestBody.password = erpCredentials.password;
+              }
+
+              const { data: response, error: funcError } = await supabase.functions.invoke('fetch-erp-data', {
+                body: requestBody
+              });
+
+              if (funcError) {
+                throw new Error(funcError.message);
+              }
+
+              if (response?.success === false) {
+                throw new Error(response.error || 'Erro no ERP');
+              }
+
+              return {
+                success: true,
+                data: (response?.data || []) as RawSaleRow[],
+                label: period.label,
+              };
+            } catch (err) {
+              lastError = err instanceof Error ? err.message : 'Erro';
+              console.warn(`[ERP] ${period.label} tentativa ${attempt + 1}/${MAX_RETRIES + 1} falhou:`, lastError);
+              
+              // Wait before retry (exponential backoff)
+              if (attempt < MAX_RETRIES) {
+                await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+              }
             }
-
-            const { data: response, error: funcError } = await supabase.functions.invoke('fetch-erp-data', {
-              body: requestBody
-            });
-
-            if (funcError) {
-              throw new Error(funcError.message);
-            }
-
-            if (response?.success === false) {
-              throw new Error(response.error || 'Erro no ERP');
-            }
-
-            return {
-              success: true,
-              data: (response?.data || []) as RawSaleRow[],
-              label: period.label,
-            };
-          } catch (err) {
-            return {
-              success: false,
-              data: [] as RawSaleRow[],
-              label: period.label,
-              error: err instanceof Error ? err.message : 'Erro',
-            };
           }
+          
+          return {
+            success: false,
+            data: [] as RawSaleRow[],
+            label: period.label,
+            error: lastError,
+          };
         })
       );
 
