@@ -12,9 +12,9 @@ import { Badge } from '@/components/ui/badge';
 export function CacheInfoButton() {
   const { cacheMeta, clearCache } = useSheetData();
 
-  const handleClearCache = () => {
-    clearCache();
-    toast.success('Cache limpo com sucesso');
+  const handleClearCache = async () => {
+    await clearCache();
+    toast.success('Cache limpo com sucesso (Supabase)');
   };
 
   const formatDate = (date: Date | null) => {
@@ -66,7 +66,7 @@ export function CacheInfoButton() {
       <PopoverContent className="w-80" align="end">
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h4 className="font-semibold text-sm">Cache Local (por mês)</h4>
+            <h4 className="font-semibold text-sm">Cache Supabase (por mês)</h4>
             {cacheMeta.totalEntries > 0 && (
               <Button 
                 variant="destructive" 
@@ -136,7 +136,7 @@ export function CacheInfoButton() {
           
           {cacheMeta.totalEntries === 0 && (
             <p className="text-xs text-muted-foreground text-center py-2">
-              Nenhum dado em cache. Os dados serão armazenados automaticamente por mês após a primeira busca.
+              Nenhum dado em cache. Os dados serão armazenados no Supabase automaticamente por mês após a primeira busca.
             </p>
           )}
           

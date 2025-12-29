@@ -1,12 +1,10 @@
 import { useCallback, useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 import { RawSaleRow } from '@/contexts/SheetDataContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Cache configuration
-const MONTHLY_CACHE_PREFIX = 'erp_month_';
-const CONSOLIDATED_CACHE_KEY = 'erp_consolidated_cache';
-const CACHE_META_KEY = 'erp_cache_meta_v2';
 const MAX_CACHE_AGE_HOURS = 24;
-const MAX_CACHE_SIZE_MB = 50;
 const MONTHS_TO_REFRESH = 3; // Only refresh last 3 months
 
 interface MonthlyCacheEntry {
@@ -17,31 +15,12 @@ interface MonthlyCacheEntry {
   recordCount: number;
 }
 
-interface ConsolidatedCache {
-  timestamp: number;
-  period: { from: string; to: string };
-  monthKeys: string[];
-  totalRecords: number;
-}
-
 interface CacheMeta {
   totalEntries: number;
   totalSizeMB: number;
   oldestEntry: Date | null;
   newestEntry: Date | null;
   monthsCached: string[];
-}
-
-// Generate key for a specific month
-function getMonthKey(year: number, month: number): string {
-  return `${MONTHLY_CACHE_PREFIX}${year}_${String(month).padStart(2, '0')}`;
-}
-
-// Parse month key to get year and month
-function parseMonthKey(key: string): { year: number; month: number } | null {
-  const match = key.match(/erp_month_(\d{4})_(\d{2})/);
-  if (!match) return null;
-  return { year: parseInt(match[1]), month: parseInt(match[2]) };
 }
 
 // Check if a month is within the last N months to refresh
@@ -56,167 +35,8 @@ function isMonthWithinRefreshRange(year: number, month: number, monthsToRefresh:
   return monthsAgo >= 0 && monthsAgo < monthsToRefresh;
 }
 
-// Get storage size estimate
-function getStorageSize(obj: unknown): number {
-  const str = JSON.stringify(obj);
-  return new Blob([str]).size / (1024 * 1024);
-}
-
-// Get all monthly cache keys from localStorage
-function getAllMonthlyKeys(): string[] {
-  const keys: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key && key.startsWith(MONTHLY_CACHE_PREFIX)) {
-      keys.push(key);
-    }
-  }
-  return keys.sort();
-}
-
-// Load a single month from cache
-function loadMonthFromCache(year: number, month: number): MonthlyCacheEntry | null {
-  try {
-    const key = getMonthKey(year, month);
-    const stored = localStorage.getItem(key);
-    if (!stored) return null;
-    
-    const entry = JSON.parse(stored) as MonthlyCacheEntry;
-    
-    // Check if expired (only for months within refresh range)
-    const now = Date.now();
-    const maxAge = MAX_CACHE_AGE_HOURS * 60 * 60 * 1000;
-    
-    if (isMonthWithinRefreshRange(year, month) && now - entry.timestamp > maxAge) {
-      console.log(`[Cache] Month ${year}-${month} expired (within refresh range)`);
-      return null;
-    }
-    
-    return entry;
-  } catch (error) {
-    console.error(`[Cache] Error loading month ${year}-${month}:`, error);
-    return null;
-  }
-}
-
-// Save a single month to cache
-function saveMonthToCache(year: number, month: number, data: RawSaleRow[]): void {
-  try {
-    const key = getMonthKey(year, month);
-    const entry: MonthlyCacheEntry = {
-      data,
-      timestamp: Date.now(),
-      year,
-      month,
-      recordCount: data.length,
-    };
-    
-    localStorage.setItem(key, JSON.stringify(entry));
-    console.log(`[Cache] Saved month ${year}-${month}: ${data.length} records`);
-  } catch (error) {
-    console.error(`[Cache] Error saving month ${year}-${month}:`, error);
-    
-    // If quota exceeded, try to clear oldest months
-    if (error instanceof DOMException && error.name === 'QuotaExceededError') {
-      pruneOldestMonths(3);
-      try {
-        const key = getMonthKey(year, month);
-        const entry: MonthlyCacheEntry = {
-          data,
-          timestamp: Date.now(),
-          year,
-          month,
-          recordCount: data.length,
-        };
-        localStorage.setItem(key, JSON.stringify(entry));
-      } catch {
-        console.error('[Cache] Still failed after pruning');
-      }
-    }
-  }
-}
-
-// Prune oldest months from cache
-function pruneOldestMonths(count: number): void {
-  const keys = getAllMonthlyKeys();
-  const toRemove = keys.slice(0, count);
-  
-  for (const key of toRemove) {
-    localStorage.removeItem(key);
-    console.log(`[Cache] Pruned old month: ${key}`);
-  }
-}
-
-// Load consolidated cache metadata
-function loadConsolidatedCache(): ConsolidatedCache | null {
-  try {
-    const stored = localStorage.getItem(CONSOLIDATED_CACHE_KEY);
-    if (!stored) return null;
-    
-    const cache = JSON.parse(stored) as ConsolidatedCache;
-    
-    // Check if expired (24h)
-    const now = Date.now();
-    const maxAge = MAX_CACHE_AGE_HOURS * 60 * 60 * 1000;
-    
-    if (now - cache.timestamp > maxAge) {
-      console.log('[Cache] Consolidated cache expired');
-      return null;
-    }
-    
-    return cache;
-  } catch (error) {
-    console.error('[Cache] Error loading consolidated cache:', error);
-    return null;
-  }
-}
-
-// Save consolidated cache metadata
-function saveConsolidatedCache(period: { from: string; to: string }, monthKeys: string[], totalRecords: number): void {
-  try {
-    const cache: ConsolidatedCache = {
-      timestamp: Date.now(),
-      period,
-      monthKeys,
-      totalRecords,
-    };
-    localStorage.setItem(CONSOLIDATED_CACHE_KEY, JSON.stringify(cache));
-    console.log(`[Cache] Saved consolidated cache: ${totalRecords} records from ${monthKeys.length} months`);
-  } catch (error) {
-    console.error('[Cache] Error saving consolidated cache:', error);
-  }
-}
-
-// Calculate total cache size
-function calculateTotalCacheSize(): number {
-  let totalSize = 0;
-  const keys = getAllMonthlyKeys();
-  
-  for (const key of keys) {
-    const item = localStorage.getItem(key);
-    if (item) {
-      totalSize += getStorageSize(JSON.parse(item));
-    }
-  }
-  
-  return totalSize;
-}
-
-// Prune cache if over size limit
-function pruneCacheIfNeeded(): void {
-  let size = calculateTotalCacheSize();
-  
-  while (size > MAX_CACHE_SIZE_MB) {
-    const keys = getAllMonthlyKeys();
-    if (keys.length === 0) break;
-    
-    localStorage.removeItem(keys[0]);
-    console.log(`[Cache] Pruned ${keys[0]} to reduce size`);
-    size = calculateTotalCacheSize();
-  }
-}
-
 export function useErpCache() {
+  const { user } = useAuth();
   const [cacheMeta, setCacheMeta] = useState<CacheMeta>({
     totalEntries: 0,
     totalSizeMB: 0,
@@ -224,12 +44,11 @@ export function useErpCache() {
     newestEntry: null,
     monthsCached: [],
   });
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Update cache metadata
-  const updateCacheMeta = useCallback(() => {
-    const keys = getAllMonthlyKeys();
-    
-    if (keys.length === 0) {
+  // Load cache metadata from Supabase
+  const updateCacheMeta = useCallback(async () => {
+    if (!user) {
       setCacheMeta({
         totalEntries: 0,
         totalSizeMB: 0,
@@ -240,181 +59,313 @@ export function useErpCache() {
       return;
     }
 
-    const timestamps: number[] = [];
-    const monthsCached: string[] = [];
-    
-    for (const key of keys) {
-      try {
-        const stored = localStorage.getItem(key);
-        if (stored) {
-          const entry = JSON.parse(stored) as MonthlyCacheEntry;
-          timestamps.push(entry.timestamp);
-          monthsCached.push(`${entry.year}-${String(entry.month).padStart(2, '0')}`);
-        }
-      } catch {
-        // Skip invalid entries
+    try {
+      const { data, error } = await supabase
+        .from('erp_cache')
+        .select('year, month, record_count, created_at, updated_at')
+        .eq('user_id', user.id)
+        .order('year', { ascending: true })
+        .order('month', { ascending: true });
+
+      if (error) {
+        console.error('[Cache] Error loading cache meta:', error);
+        return;
       }
+
+      if (!data || data.length === 0) {
+        setCacheMeta({
+          totalEntries: 0,
+          totalSizeMB: 0,
+          oldestEntry: null,
+          newestEntry: null,
+          monthsCached: [],
+        });
+        return;
+      }
+
+      const timestamps = data.map(d => new Date(d.updated_at).getTime());
+      const monthsCached = data.map(d => `${d.year}-${String(d.month).padStart(2, '0')}`);
+      const totalRecords = data.reduce((sum, d) => sum + d.record_count, 0);
+      
+      // Estimate size: ~500 bytes per record on average
+      const estimatedSizeMB = (totalRecords * 500) / (1024 * 1024);
+
+      setCacheMeta({
+        totalEntries: data.length,
+        totalSizeMB: parseFloat(estimatedSizeMB.toFixed(2)),
+        oldestEntry: timestamps.length > 0 ? new Date(Math.min(...timestamps)) : null,
+        newestEntry: timestamps.length > 0 ? new Date(Math.max(...timestamps)) : null,
+        monthsCached,
+      });
+    } catch (error) {
+      console.error('[Cache] Error updating cache meta:', error);
     }
-
-    const sizeMB = calculateTotalCacheSize();
-
-    setCacheMeta({
-      totalEntries: keys.length,
-      totalSizeMB: parseFloat(sizeMB.toFixed(2)),
-      oldestEntry: timestamps.length > 0 ? new Date(Math.min(...timestamps)) : null,
-      newestEntry: timestamps.length > 0 ? new Date(Math.max(...timestamps)) : null,
-      monthsCached: monthsCached.sort(),
-    });
-  }, []);
+  }, [user]);
 
   // Initialize meta on mount
   useEffect(() => {
     updateCacheMeta();
   }, [updateCacheMeta]);
 
+  // Load a single month from Supabase cache
+  const loadMonthFromCache = useCallback(async (year: number, month: number): Promise<MonthlyCacheEntry | null> => {
+    if (!user) return null;
+
+    try {
+      const { data, error } = await supabase
+        .from('erp_cache')
+        .select('data, record_count, updated_at')
+        .eq('user_id', user.id)
+        .eq('year', year)
+        .eq('month', month)
+        .maybeSingle();
+
+      if (error) {
+        console.error(`[Cache] Error loading month ${year}-${month}:`, error);
+        return null;
+      }
+
+      if (!data) return null;
+
+      const timestamp = new Date(data.updated_at).getTime();
+      const now = Date.now();
+      const maxAge = MAX_CACHE_AGE_HOURS * 60 * 60 * 1000;
+
+      // Check if expired (only for months within refresh range)
+      if (isMonthWithinRefreshRange(year, month) && now - timestamp > maxAge) {
+        console.log(`[Cache] Month ${year}-${month} expired (within refresh range)`);
+        return null;
+      }
+
+      // Cast data properly - it's stored as JSONB
+      const rawData = data.data as unknown;
+      if (!Array.isArray(rawData)) {
+        console.error(`[Cache] Invalid data format for month ${year}-${month}`);
+        return null;
+      }
+
+      return {
+        data: rawData as RawSaleRow[],
+        timestamp,
+        year,
+        month,
+        recordCount: data.record_count,
+      };
+    } catch (error) {
+      console.error(`[Cache] Error loading month ${year}-${month}:`, error);
+      return null;
+    }
+  }, [user]);
+
+  // Save a single month to Supabase cache
+  const saveMonthToCache = useCallback(async (year: number, month: number, data: RawSaleRow[]): Promise<void> => {
+    if (!user) return;
+
+    try {
+      // First, try to delete existing entry
+      await supabase
+        .from('erp_cache')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('year', year)
+        .eq('month', month);
+      
+      // Then insert new entry - use type assertion for the insert
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase
+        .from('erp_cache') as any)
+        .insert({
+          user_id: user.id,
+          year,
+          month,
+          data: data,
+          record_count: data.length,
+        });
+
+      if (error) {
+        console.error(`[Cache] Error saving month ${year}-${month}:`, error);
+        return;
+      }
+
+      console.log(`[Cache] Saved month ${year}-${month}: ${data.length} records to Supabase`);
+    } catch (error) {
+      console.error(`[Cache] Error saving month ${year}-${month}:`, error);
+    }
+  }, [user]);
+
   // Check if a specific month is cached and valid
-  const isMonthCached = useCallback((year: number, month: number): boolean => {
-    const entry = loadMonthFromCache(year, month);
+  const isMonthCached = useCallback(async (year: number, month: number): Promise<boolean> => {
+    const entry = await loadMonthFromCache(year, month);
     return entry !== null;
-  }, []);
+  }, [loadMonthFromCache]);
 
   // Check if a month needs refresh (is within last 3 months and expired or not cached)
-  const monthNeedsRefresh = useCallback((year: number, month: number): boolean => {
+  const monthNeedsRefresh = useCallback(async (year: number, month: number): Promise<boolean> => {
     // If not within refresh range, never needs refresh (use cache forever)
     if (!isMonthWithinRefreshRange(year, month)) {
-      return !isMonthCached(year, month); // Only refresh if not cached at all
+      const cached = await isMonthCached(year, month);
+      return !cached; // Only refresh if not cached at all
     }
     
     // Within refresh range - check if cached and not expired
-    const entry = loadMonthFromCache(year, month);
+    const entry = await loadMonthFromCache(year, month);
     if (!entry) return true;
     
     const now = Date.now();
     const maxAge = MAX_CACHE_AGE_HOURS * 60 * 60 * 1000;
     return now - entry.timestamp > maxAge;
-  }, [isMonthCached]);
+  }, [isMonthCached, loadMonthFromCache]);
 
   // Get cached data for a specific month
-  const getMonthData = useCallback((year: number, month: number): RawSaleRow[] | null => {
-    const entry = loadMonthFromCache(year, month);
+  const getMonthData = useCallback(async (year: number, month: number): Promise<RawSaleRow[] | null> => {
+    const entry = await loadMonthFromCache(year, month);
     return entry?.data || null;
-  }, []);
+  }, [loadMonthFromCache]);
 
   // Save data for a specific month
-  const setMonthData = useCallback((year: number, month: number, data: RawSaleRow[]): void => {
-    saveMonthToCache(year, month, data);
-    pruneCacheIfNeeded();
-    updateCacheMeta();
-  }, [updateCacheMeta]);
+  const setMonthData = useCallback(async (year: number, month: number, data: RawSaleRow[]): Promise<void> => {
+    await saveMonthToCache(year, month, data);
+    await updateCacheMeta();
+  }, [saveMonthToCache, updateCacheMeta]);
 
   // Get all cached data for a date range (combines monthly caches)
-  const getCachedData = useCallback((dateFrom: Date, dateTo: Date): RawSaleRow[] | null => {
-    const startYear = dateFrom.getFullYear();
-    const startMonth = dateFrom.getMonth() + 1;
-    const endYear = dateTo.getFullYear();
-    const endMonth = dateTo.getMonth() + 1;
+  const getCachedData = useCallback(async (dateFrom: Date, dateTo: Date): Promise<RawSaleRow[] | null> => {
+    if (!user) return null;
     
-    const allData: RawSaleRow[] = [];
-    let allMonthsCached = true;
+    setIsLoading(true);
     
-    // Iterate through all months in range
-    let year = startYear;
-    let month = startMonth;
-    
-    while (year < endYear || (year === endYear && month <= endMonth)) {
-      const monthData = getMonthData(year, month);
+    try {
+      const startYear = dateFrom.getFullYear();
+      const startMonth = dateFrom.getMonth() + 1;
+      const endYear = dateTo.getFullYear();
+      const endMonth = dateTo.getMonth() + 1;
       
-      if (!monthData) {
-        // If this month is not within refresh range, we can't proceed without it
-        if (!isMonthWithinRefreshRange(year, month)) {
-          console.log(`[Cache] Missing old month ${year}-${month}, cannot use cache`);
+      const allData: RawSaleRow[] = [];
+      let allMonthsCached = true;
+      
+      // Iterate through all months in range
+      let year = startYear;
+      let month = startMonth;
+      
+      while (year < endYear || (year === endYear && month <= endMonth)) {
+        const monthData = await getMonthData(year, month);
+        
+        if (!monthData) {
+          // If this month is not within refresh range, we can't proceed without it
+          if (!isMonthWithinRefreshRange(year, month)) {
+            console.log(`[Cache] Missing old month ${year}-${month}, cannot use cache`);
+            allMonthsCached = false;
+            break;
+          }
+          // If within refresh range, we'll need to fetch it
+          console.log(`[Cache] Missing recent month ${year}-${month}`);
           allMonthsCached = false;
-          break;
+        } else {
+          allData.push(...monthData);
         }
-        // If within refresh range, we'll need to fetch it
-        console.log(`[Cache] Missing recent month ${year}-${month}`);
-        allMonthsCached = false;
-      } else {
-        allData.push(...monthData);
+        
+        // Move to next month
+        month++;
+        if (month > 12) {
+          month = 1;
+          year++;
+        }
       }
       
-      // Move to next month
-      month++;
-      if (month > 12) {
-        month = 1;
-        year++;
+      // Filter data to exact date range
+      if (allMonthsCached && allData.length > 0) {
+        const filtered = allData.filter(row => {
+          const dataVenda = row['Data Venda'];
+          if (!dataVenda) return true;
+          
+          let rowDate: Date | null = null;
+          if (typeof dataVenda === 'string') {
+            rowDate = new Date(dataVenda);
+          }
+          
+          if (!rowDate || isNaN(rowDate.getTime())) return true;
+          
+          return rowDate >= dateFrom && rowDate <= dateTo;
+        });
+        
+        console.log(`[Cache] Combined ${allData.length} records from Supabase cache, filtered to ${filtered.length}`);
+        return filtered;
       }
+      
+      return null;
+    } finally {
+      setIsLoading(false);
     }
+  }, [user, getMonthData]);
+
+  // Set cached data (splits into monthly caches)
+  const setCachedData = useCallback(async (dateFrom: Date, dateTo: Date, data: RawSaleRow[]): Promise<void> => {
+    if (!user) return;
     
-    // Filter data to exact date range
-    if (allMonthsCached && allData.length > 0) {
-      const filtered = allData.filter(row => {
+    setIsLoading(true);
+    
+    try {
+      // Group data by month
+      const monthlyData = new Map<string, RawSaleRow[]>();
+      
+      for (const row of data) {
         const dataVenda = row['Data Venda'];
-        if (!dataVenda) return true;
+        if (!dataVenda) continue;
         
         let rowDate: Date | null = null;
         if (typeof dataVenda === 'string') {
           rowDate = new Date(dataVenda);
         }
         
-        if (!rowDate || isNaN(rowDate.getTime())) return true;
+        if (!rowDate || isNaN(rowDate.getTime())) continue;
         
-        return rowDate >= dateFrom && rowDate <= dateTo;
+        const year = rowDate.getFullYear();
+        const month = rowDate.getMonth() + 1;
+        const key = `${year}-${month}`;
+        
+        if (!monthlyData.has(key)) {
+          monthlyData.set(key, []);
+        }
+        monthlyData.get(key)!.push(row);
+      }
+      
+      // Save each month (in parallel for speed)
+      const savePromises = Array.from(monthlyData).map(([key, monthData]) => {
+        const [yearStr, monthStr] = key.split('-');
+        const year = parseInt(yearStr);
+        const month = parseInt(monthStr);
+        return setMonthData(year, month, monthData);
       });
       
-      console.log(`[Cache] Combined ${allData.length} records from monthly caches, filtered to ${filtered.length}`);
-      return filtered;
-    }
-    
-    return null;
-  }, [getMonthData]);
-
-  // Set cached data (splits into monthly caches)
-  const setCachedData = useCallback((dateFrom: Date, dateTo: Date, data: RawSaleRow[]): void => {
-    // Group data by month
-    const monthlyData = new Map<string, RawSaleRow[]>();
-    
-    for (const row of data) {
-      const dataVenda = row['Data Venda'];
-      if (!dataVenda) continue;
+      await Promise.all(savePromises);
       
-      let rowDate: Date | null = null;
-      if (typeof dataVenda === 'string') {
-        rowDate = new Date(dataVenda);
+      // Update consolidated cache metadata
+      if (user) {
+        const uniqueSales = new Set(data.map(row => row['Venda #'])).size;
+        const totalRevenue = data.reduce((sum, row) => sum + (row['Líquido'] || 0), 0);
+        
+        await supabase
+          .from('erp_consolidated_cache')
+          .upsert({
+            user_id: user.id,
+            start_date: dateFrom.toISOString().split('T')[0],
+            end_date: dateTo.toISOString().split('T')[0],
+            unique_sales: uniqueSales,
+            total_revenue: totalRevenue,
+            total_records: data.length,
+          }, {
+            onConflict: 'user_id',
+          });
       }
       
-      if (!rowDate || isNaN(rowDate.getTime())) continue;
-      
-      const year = rowDate.getFullYear();
-      const month = rowDate.getMonth() + 1;
-      const key = `${year}-${month}`;
-      
-      if (!monthlyData.has(key)) {
-        monthlyData.set(key, []);
-      }
-      monthlyData.get(key)!.push(row);
+      console.log(`[Cache] Saved ${data.length} records across ${monthlyData.size} months to Supabase`);
+    } finally {
+      setIsLoading(false);
     }
-    
-    // Save each month
-    for (const [key, monthData] of monthlyData) {
-      const [yearStr, monthStr] = key.split('-');
-      const year = parseInt(yearStr);
-      const month = parseInt(monthStr);
-      setMonthData(year, month, monthData);
-    }
-    
-    // Save consolidated cache metadata
-    const periodStr = {
-      from: dateFrom.toISOString().split('T')[0],
-      to: dateTo.toISOString().split('T')[0],
-    };
-    saveConsolidatedCache(periodStr, Array.from(monthlyData.keys()), data.length);
-    
-    console.log(`[Cache] Saved ${data.length} records across ${monthlyData.size} months`);
-  }, [setMonthData]);
+  }, [user, setMonthData]);
 
   // Get months that need to be refreshed for a date range
-  const getMonthsToRefresh = useCallback((dateFrom: Date, dateTo: Date): { year: number; month: number; label: string }[] => {
+  const getMonthsToRefresh = useCallback(async (dateFrom: Date, dateTo: Date): Promise<{ year: number; month: number; label: string }[]> => {
     const startYear = dateFrom.getFullYear();
     const startMonth = dateFrom.getMonth() + 1;
     const endYear = dateTo.getFullYear();
@@ -427,7 +378,8 @@ export function useErpCache() {
     let month = startMonth;
     
     while (year < endYear || (year === endYear && month <= endMonth)) {
-      if (monthNeedsRefresh(year, month)) {
+      const needsRefresh = await monthNeedsRefresh(year, month);
+      if (needsRefresh) {
         monthsToRefresh.push({
           year,
           month,
@@ -447,7 +399,7 @@ export function useErpCache() {
   }, [monthNeedsRefresh]);
 
   // Get cached months for a date range (months that don't need refresh)
-  const getCachedMonths = useCallback((dateFrom: Date, dateTo: Date): { year: number; month: number; data: RawSaleRow[] }[] => {
+  const getCachedMonths = useCallback(async (dateFrom: Date, dateTo: Date): Promise<{ year: number; month: number; data: RawSaleRow[] }[]> => {
     const startYear = dateFrom.getFullYear();
     const startMonth = dateFrom.getMonth() + 1;
     const endYear = dateTo.getFullYear();
@@ -459,8 +411,9 @@ export function useErpCache() {
     let month = startMonth;
     
     while (year < endYear || (year === endYear && month <= endMonth)) {
-      if (!monthNeedsRefresh(year, month)) {
-        const data = getMonthData(year, month);
+      const needsRefresh = await monthNeedsRefresh(year, month);
+      if (!needsRefresh) {
+        const data = await getMonthData(year, month);
         if (data) {
           cachedMonths.push({ year, month, data });
         }
@@ -477,32 +430,73 @@ export function useErpCache() {
     return cachedMonths;
   }, [monthNeedsRefresh, getMonthData]);
 
-  // Clear all cache
-  const clearAllCache = useCallback(() => {
-    const keys = getAllMonthlyKeys();
-    for (const key of keys) {
-      localStorage.removeItem(key);
+  // Clear all cache for current user
+  const clearAllCache = useCallback(async () => {
+    if (!user) return;
+    
+    setIsLoading(true);
+    
+    try {
+      const { error: cacheError } = await supabase
+        .from('erp_cache')
+        .delete()
+        .eq('user_id', user.id);
+        
+      if (cacheError) {
+        console.error('[Cache] Error clearing cache:', cacheError);
+      }
+      
+      const { error: consolidatedError } = await supabase
+        .from('erp_consolidated_cache')
+        .delete()
+        .eq('user_id', user.id);
+        
+      if (consolidatedError) {
+        console.error('[Cache] Error clearing consolidated cache:', consolidatedError);
+      }
+      
+      await updateCacheMeta();
+      console.log('[Cache] All Supabase cache cleared');
+    } finally {
+      setIsLoading(false);
     }
-    localStorage.removeItem(CONSOLIDATED_CACHE_KEY);
-    localStorage.removeItem(CACHE_META_KEY);
-    updateCacheMeta();
-    console.log('[Cache] All cache cleared');
-  }, [updateCacheMeta]);
+  }, [user, updateCacheMeta]);
 
   // Get cache info for display
-  const getCacheInfo = useCallback((dateFrom: Date, dateTo: Date): { isCached: boolean; cachedAt: Date | null; recordCount: number } => {
-    const consolidated = loadConsolidatedCache();
-    
-    if (!consolidated) {
+  const getCacheInfo = useCallback(async (dateFrom: Date, dateTo: Date): Promise<{ isCached: boolean; cachedAt: Date | null; recordCount: number }> => {
+    if (!user) {
       return { isCached: false, cachedAt: null, recordCount: 0 };
     }
     
-    return {
-      isCached: true,
-      cachedAt: new Date(consolidated.timestamp),
-      recordCount: consolidated.totalRecords,
-    };
-  }, []);
+    try {
+      const { data, error } = await supabase
+        .from('erp_consolidated_cache')
+        .select('updated_at, total_records')
+        .eq('user_id', user.id)
+        .maybeSingle();
+        
+      if (error || !data) {
+        return { isCached: false, cachedAt: null, recordCount: 0 };
+      }
+      
+      const cachedAt = new Date(data.updated_at);
+      const now = Date.now();
+      const maxAge = MAX_CACHE_AGE_HOURS * 60 * 60 * 1000;
+      
+      if (now - cachedAt.getTime() > maxAge) {
+        return { isCached: false, cachedAt: null, recordCount: 0 };
+      }
+      
+      return {
+        isCached: true,
+        cachedAt,
+        recordCount: data.total_records,
+      };
+    } catch (error) {
+      console.error('[Cache] Error getting cache info:', error);
+      return { isCached: false, cachedAt: null, recordCount: 0 };
+    }
+  }, [user]);
 
   return {
     getCachedData,
@@ -511,6 +505,7 @@ export function useErpCache() {
     getCacheInfo,
     cacheMeta,
     updateCacheMeta,
+    isLoading,
     // New methods for smart caching
     getMonthData,
     setMonthData,
@@ -521,7 +516,7 @@ export function useErpCache() {
     isMonthWithinRefreshRange,
     // Constants
     maxCacheAgeHours: MAX_CACHE_AGE_HOURS,
-    maxCacheSizeMB: MAX_CACHE_SIZE_MB,
+    maxCacheSizeMB: Infinity, // No limit with Supabase
     monthsToRefresh: MONTHS_TO_REFRESH,
   };
 }
