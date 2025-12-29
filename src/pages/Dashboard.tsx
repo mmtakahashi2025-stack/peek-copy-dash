@@ -41,13 +41,18 @@ export default function Dashboard() {
     setFilters(newFilters);
   }, []);
 
-  // Load ERP data on mount if not already loaded
+  // Auto-load ERP data on mount if credentials are available and not already loaded
   useEffect(() => {
-    if (!isConnected && !isLoading && !initialLoadDone) {
+    if (
+      !initialLoadDone && 
+      !isLoading && 
+      !isConnected && 
+      erpCredentials?.hasPassword
+    ) {
       setInitialLoadDone(true);
       loadErpData(filters.dateFrom, filters.dateTo);
     }
-  }, [isConnected, isLoading, initialLoadDone, loadErpData, filters.dateFrom, filters.dateTo]);
+  }, [initialLoadDone, isLoading, isConnected, erpCredentials?.hasPassword, loadErpData, filters.dateFrom, filters.dateTo]);
 
   // Fetch KPIs when filters change
   useEffect(() => {
