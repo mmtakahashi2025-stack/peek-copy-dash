@@ -72,10 +72,26 @@ const parseRowDate = (dataVenda: number | string): Date | null => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), dataVenda);
   } else if (typeof dataVenda === 'string') {
-    // Try to parse string date (DD/MM/YYYY format common in Brazil)
-    const parts = dataVenda.split('/');
-    if (parts.length === 3) {
-      return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+    // Try DD/MM/YYYY format (common in Brazil)
+    if (dataVenda.includes('/')) {
+      const parts = dataVenda.split('/');
+      if (parts.length === 3) {
+        return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+      }
+    }
+    
+    // Try YYYY-MM-DD format (ISO/API format)
+    if (dataVenda.includes('-')) {
+      const parts = dataVenda.split('-');
+      if (parts.length === 3 && parts[0].length === 4) {
+        return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2].substring(0, 2)));
+      }
+    }
+    
+    // Try parsing with Date constructor as fallback
+    const parsed = new Date(dataVenda);
+    if (!isNaN(parsed.getTime())) {
+      return parsed;
     }
   }
   
