@@ -6,6 +6,7 @@ import { RankingCard } from '@/components/dashboard/RankingCard';
 import { ProductRankingCard } from '@/components/dashboard/ProductRankingCard';
 import { SalesEvolutionChart } from '@/components/dashboard/SalesEvolutionChart';
 import { ErpPasswordDialog } from '@/components/dashboard/ErpPasswordDialog';
+import { LoadingProgress } from '@/components/dashboard/LoadingProgress';
 import { useSheetData, KpiData } from '@/contexts/SheetDataContext';
 import { KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -23,7 +24,7 @@ interface Filters {
 }
 
 export default function Dashboard() {
-  const { rawData, isLoading, isConnected, getKpis, getColaboradores, getProdutos, fetchExcellencePercentage, fetchLeadsTotal, loadErpData, erpCredentials, refreshErpCredentials } = useSheetData();
+  const { rawData, isLoading, isConnected, getKpis, getColaboradores, getProdutos, fetchExcellencePercentage, fetchLeadsTotal, loadErpData, erpCredentials, refreshErpCredentials, loadingProgress } = useSheetData();
   
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [filters, setFilters] = useState<Filters>({
@@ -162,6 +163,9 @@ export default function Dashboard() {
           onOpenChange={setShowPasswordDialog}
           onSaved={refreshErpCredentials}
         />
+
+        {/* Loading Progress Indicator */}
+        <LoadingProgress progress={loadingProgress} />
 
         {/* KPI Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
