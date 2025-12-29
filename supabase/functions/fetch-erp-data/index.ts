@@ -193,9 +193,24 @@ serve(async (req) => {
     if (!salesResponse.ok) {
       const errorText = await salesResponse.text();
       console.error('ERP sales fetch failed:', salesResponse.status, errorText);
+
+      let message = 'Falha ao buscar vendas no ERP';
+      try {
+        const parsed = JSON.parse(errorText);
+        if (typeof parsed?.data === 'string' && parsed.data.trim()) message = parsed.data;
+        else if (typeof parsed?.error === 'string' && parsed.error.trim()) message = parsed.error;
+      } catch {
+        if (errorText?.trim()) message = errorText;
+      }
+
+      // Return 200 so the frontend can read the error message (Supabase SDK treats non-2xx as opaque)
       return new Response(
-        JSON.stringify({ error: 'Failed to fetch sales data from ERP API' }),
-        { status: salesResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({
+          success: false,
+          error: message,
+          upstreamStatus: salesResponse.status,
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
