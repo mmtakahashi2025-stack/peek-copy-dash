@@ -1,14 +1,28 @@
+# Bloquear todos os buscadores de indexar este site
+User-agent: *
+Disallow: /
+
+# Bloquear buscadores específicos
 User-agent: Googlebot
-Allow: /
+Disallow: /
 
 User-agent: Bingbot
-Allow: /
+Disallow: /
 
 User-agent: Twitterbot
-Allow: /
+Disallow: /
 
 User-agent: facebookexternalhit
-Allow: /
+Disallow: /
 
-User-agent: *
-Allow: /
+User-agent: Slurp
+Disallow: /
+
+User-agent: DuckDuckBot
+Disallow: /
+
+User-agent: Baiduspider
+Disallow: /
+
+User-agent: YandexBot
+Disallow: /
