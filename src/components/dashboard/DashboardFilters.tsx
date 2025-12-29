@@ -2,14 +2,15 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { CalendarIcon, ArrowLeftRight, Search, Loader2 } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { CalendarIcon, ArrowLeftRight, Search, Loader2, Building2, Users, ChevronDown } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays, subMonths, startOfYear, endOfYear, subYears } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { useSheetData } from '@/contexts/SheetDataContext';
 import { DateRange } from 'react-day-picker';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 type DatePreset = {
   label: string;
@@ -32,7 +33,9 @@ interface DashboardFiltersProps {
     dateFrom: Date | undefined;
     dateTo: Date | undefined;
     filial: string;
+    filiais: string[];
     colaborador: string;
+    colaboradores: string[];
     compareEnabled: boolean;
     compareDateFrom: Date | undefined;
     compareDateTo: Date | undefined;
@@ -40,7 +43,7 @@ interface DashboardFiltersProps {
 }
 
 export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
-  const { filiais, getColaboradores } = useSheetData();
+  const { filiais, colaboradores: allColaboradores } = useSheetData();
   
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: startOfMonth(new Date()),
@@ -51,12 +54,9 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
     to: endOfMonth(subMonths(new Date(), 1)),
   });
   const [compareEnabled, setCompareEnabled] = useState(false);
-  const [filial, setFilial] = useState('todas');
-  const [colaborador, setColaborador] = useState('todos');
+  const [selectedFiliais, setSelectedFiliais] = useState<string[]>(['todas']);
+  const [selectedColaboradores, setSelectedColaboradores] = useState<string[]>(['todos']);
   const [isLoading, setIsLoading] = useState(false);
-
-  // Get colaboradores based on selected filial
-  const colaboradoresData = getColaboradores(filial);
 
   // Aplicar filtros iniciais ao montar o componente
   useEffect(() => {
@@ -72,8 +72,10 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
     onFiltersChange?.({
       dateFrom: dateRange?.from,
       dateTo: dateRange?.to,
-      filial,
-      colaborador,
+      filial: selectedFiliais.includes('todas') ? 'todas' : selectedFiliais[0] || 'todas',
+      filiais: selectedFiliais,
+      colaborador: selectedColaboradores.includes('todos') ? 'todos' : selectedColaboradores[0] || 'todos',
+      colaboradores: selectedColaboradores,
       compareEnabled,
       compareDateFrom: compareDateRange?.from,
       compareDateTo: compareDateRange?.to,
@@ -82,20 +84,59 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
     setIsLoading(false);
   };
 
-  // Reset colaborador quando mudar filial
-  useEffect(() => {
-    if (filial !== 'todas') {
-      const colaboradorExiste = colaboradoresData.some(c => c.id.toString() === colaborador);
-      if (!colaboradorExiste && colaborador !== 'todos') {
-        setColaborador('todos');
-      }
+  const handleFilialToggle = (filialId: string) => {
+    if (filialId === 'todas') {
+      setSelectedFiliais(['todas']);
+    } else {
+      setSelectedFiliais(prev => {
+        const newSelection = prev.filter(f => f !== 'todas');
+        if (newSelection.includes(filialId)) {
+          const filtered = newSelection.filter(f => f !== filialId);
+          return filtered.length === 0 ? ['todas'] : filtered;
+        } else {
+          return [...newSelection, filialId];
+        }
+      });
     }
-  }, [filial, colaborador, colaboradoresData]);
+  };
+
+  const handleColaboradorToggle = (colaboradorId: string) => {
+    if (colaboradorId === 'todos') {
+      setSelectedColaboradores(['todos']);
+    } else {
+      setSelectedColaboradores(prev => {
+        const newSelection = prev.filter(c => c !== 'todos');
+        if (newSelection.includes(colaboradorId)) {
+          const filtered = newSelection.filter(c => c !== colaboradorId);
+          return filtered.length === 0 ? ['todos'] : filtered;
+        } else {
+          return [...newSelection, colaboradorId];
+        }
+      });
+    }
+  };
 
   const formatDateRange = (range: DateRange | undefined) => {
     if (!range?.from) return 'Selecionar período';
     if (!range.to) return format(range.from, 'dd/MM/yy', { locale: ptBR });
     return `${format(range.from, 'dd/MM', { locale: ptBR })} - ${format(range.to, 'dd/MM/yy', { locale: ptBR })}`;
+  };
+
+  const getFilialLabel = () => {
+    if (selectedFiliais.includes('todas')) return 'Todas as Filiais';
+    if (selectedFiliais.length === 1) {
+      const filial = filiais.find(f => f.id === selectedFiliais[0]);
+      return filial?.nome || 'Filial';
+    }
+    return `${selectedFiliais.length} filiais`;
+  };
+
+  const getColaboradorLabel = () => {
+    if (selectedColaboradores.includes('todos')) return 'Todos';
+    if (selectedColaboradores.length === 1) {
+      return selectedColaboradores[0];
+    }
+    return `${selectedColaboradores.length} vendedores`;
   };
 
   return (
@@ -114,7 +155,7 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
             {formatDateRange(dateRange)}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="start">
+        <PopoverContent className="w-auto p-0 z-50 bg-popover" align="start">
           <div className="flex">
             <div className="border-r p-1 flex flex-col gap-0.5">
               {datePresets.map((preset) => (
@@ -133,7 +174,6 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
               mode="range"
               selected={dateRange}
               onSelect={(range) => {
-                // When only one day is clicked, set both from and to to the same date
                 if (range?.from && !range?.to) {
                   setDateRange({ from: range.from, to: range.from });
                 } else {
@@ -167,7 +207,6 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
           onCheckedChange={(enabled) => {
             setCompareEnabled(enabled);
             if (enabled && dateRange?.from && dateRange?.to) {
-              // Set compare range to same period last year
               setCompareDateRange({
                 from: subYears(dateRange.from, 1),
                 to: subYears(dateRange.to, 1),
@@ -194,12 +233,11 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
                 {formatDateRange(compareDateRange)}
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
+            <PopoverContent className="w-auto p-0 z-50 bg-popover" align="start">
               <Calendar
                 mode="range"
                 selected={compareDateRange}
                 onSelect={(range) => {
-                  // When only one day is clicked, set both from and to to the same date
                   if (range?.from && !range?.to) {
                     setCompareDateRange({ from: range.from, to: range.from });
                   } else {
@@ -217,34 +255,111 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
 
       <div className="h-6 w-px bg-border mx-1 hidden sm:block" />
 
-      {/* Filial Select */}
-      <Select value={filial} onValueChange={setFilial}>
-        <SelectTrigger className="w-[180px]">
-          <SelectValue placeholder="Selecione a filial" />
-        </SelectTrigger>
-        <SelectContent>
-          {filiais.map((f) => (
-            <SelectItem key={f.id} value={f.id}>
-              {f.nome}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {/* Filial Multi-Select */}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" className="min-w-[160px] justify-between">
+            <div className="flex items-center gap-2">
+              <Building2 className="h-4 w-4" />
+              <span className="truncate">{getFilialLabel()}</span>
+            </div>
+            <ChevronDown className="h-4 w-4 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[220px] p-0 z-50 bg-popover" align="start">
+          <ScrollArea className="h-[280px]">
+            <div className="p-2 space-y-1">
+              {/* Todas option */}
+              <div
+                className={cn(
+                  "flex items-center gap-2 p-2 rounded-md cursor-pointer hover:bg-accent",
+                  selectedFiliais.includes('todas') && "bg-accent"
+                )}
+                onClick={() => handleFilialToggle('todas')}
+              >
+                <Checkbox 
+                  checked={selectedFiliais.includes('todas')} 
+                  onCheckedChange={() => handleFilialToggle('todas')}
+                />
+                <span className="text-sm font-medium">Todas as Filiais</span>
+              </div>
+              
+              <div className="h-px bg-border my-2" />
+              
+              {/* Individual filiais */}
+              {filiais.filter(f => f.id !== 'todas').map((f) => (
+                <div
+                  key={f.id}
+                  className={cn(
+                    "flex items-center gap-2 p-2 rounded-md cursor-pointer hover:bg-accent",
+                    selectedFiliais.includes(f.id) && "bg-accent"
+                  )}
+                  onClick={() => handleFilialToggle(f.id)}
+                >
+                  <Checkbox 
+                    checked={selectedFiliais.includes(f.id)} 
+                    onCheckedChange={() => handleFilialToggle(f.id)}
+                  />
+                  <span className="text-sm">{f.nome}</span>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </PopoverContent>
+      </Popover>
 
-      {/* Colaborador Select */}
-      <Select value={colaborador} onValueChange={setColaborador}>
-        <SelectTrigger className="w-[200px]">
-          <SelectValue placeholder="Selecione o colaborador" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="todos">Todos os Colaboradores</SelectItem>
-          {colaboradoresData.map((c) => (
-            <SelectItem key={c.id} value={c.id.toString()}>
-              {c.nome}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {/* Colaborador Multi-Select */}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" className="min-w-[160px] justify-between">
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              <span className="truncate">{getColaboradorLabel()}</span>
+            </div>
+            <ChevronDown className="h-4 w-4 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[240px] p-0 z-50 bg-popover" align="start">
+          <ScrollArea className="h-[320px]">
+            <div className="p-2 space-y-1">
+              {/* Todos option */}
+              <div
+                className={cn(
+                  "flex items-center gap-2 p-2 rounded-md cursor-pointer hover:bg-accent",
+                  selectedColaboradores.includes('todos') && "bg-accent"
+                )}
+                onClick={() => handleColaboradorToggle('todos')}
+              >
+                <Checkbox 
+                  checked={selectedColaboradores.includes('todos')} 
+                  onCheckedChange={() => handleColaboradorToggle('todos')}
+                />
+                <span className="text-sm font-medium">Todos os Vendedores</span>
+              </div>
+              
+              <div className="h-px bg-border my-2" />
+              
+              {/* Individual colaboradores */}
+              {allColaboradores.map((nome) => (
+                <div
+                  key={nome}
+                  className={cn(
+                    "flex items-center gap-2 p-2 rounded-md cursor-pointer hover:bg-accent",
+                    selectedColaboradores.includes(nome) && "bg-accent"
+                  )}
+                  onClick={() => handleColaboradorToggle(nome)}
+                >
+                  <Checkbox 
+                    checked={selectedColaboradores.includes(nome)} 
+                    onCheckedChange={() => handleColaboradorToggle(nome)}
+                  />
+                  <span className="text-sm truncate">{nome}</span>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </PopoverContent>
+      </Popover>
 
       <div className="h-6 w-px bg-border mx-1 hidden sm:block" />
 
