@@ -145,6 +145,18 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
               className="p-3 pointer-events-auto"
             />
           </div>
+          <div className="p-2 border-t flex justify-end">
+            <Button 
+              size="sm" 
+              onClick={() => {
+                handleApplyFilters();
+              }}
+              disabled={isLoading}
+            >
+              {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Aplicar
+            </Button>
+          </div>
         </PopoverContent>
       </Popover>
 
