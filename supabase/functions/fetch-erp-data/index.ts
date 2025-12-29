@@ -6,11 +6,10 @@ const corsHeaders = {
 };
 
 interface SalesRequestBody {
-  startDate: string; // DD/MM/YYYY format
-  endDate: string;   // DD/MM/YYYY format
+  startDate: string;
+  endDate: string;
 }
 
-// ERP Response types
 interface ERPLoginResponse {
   success: boolean;
   status: string;
@@ -52,7 +51,6 @@ interface ERPSaleItem {
   ResumoVenda: string;
 }
 
-// Dashboard mapping - transformed data structure
 interface TransformedSaleRow {
   Filial: string;
   Emissor: string;
@@ -93,58 +91,7 @@ function transformERPData(erpData: Record<string, ERPSaleItem>): TransformedSale
   }));
 }
 
-type SessionCookies = {
-  ERPSession?: string;
-  device_id?: string;
-};
-
-function extractAllCookies(response: Response): {
-  cookies: SessionCookies;
-  cookieHeader: string;
-  rawCookies: string[];
-} {
-  // Try multiple methods to extract Set-Cookie headers
-  const setCookieList =
-    (response.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
-  const rawSetCookie = response.headers.get('set-cookie');
-  
-  // Collect all set-cookie headers
-  let rawCookies: string[] = [];
-  if (setCookieList.length > 0) {
-    rawCookies = setCookieList;
-  } else if (rawSetCookie) {
-    // Some servers concatenate cookies with comma - try to split them
-    rawCookies = rawSetCookie.split(/,(?=[^;]*=)/);
-  }
-
-  console.log('[ERP] Raw Set-Cookie headers count:', rawCookies.length);
-  console.log('[ERP] Raw Set-Cookie:', JSON.stringify(rawCookies));
-
-  const getCookieValue = (name: string): string | undefined => {
-    for (const c of rawCookies) {
-      const match = c.match(new RegExp(`${name}=([^;]+)`));
-      if (match?.[1]) return match[1];
-    }
-    return undefined;
-  };
-
-  const ERPSession = getCookieValue('ERPSession');
-  const device_id = getCookieValue('device_id');
-
-  // Build cookie header exactly as the browser would send it
-  const cookieParts: string[] = [];
-  if (ERPSession) cookieParts.push(`ERPSession=${ERPSession}`);
-  if (device_id) cookieParts.push(`device_id=${device_id}`);
-
-  return {
-    cookies: { ERPSession, device_id },
-    cookieHeader: cookieParts.join('; '),
-    rawCookies,
-  };
-}
-
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -154,14 +101,12 @@ serve(async (req) => {
   const erpPassword = Deno.env.get('ERP_API_PASSWORD');
 
   if (!erpBaseUrl || !erpEmail || !erpPassword) {
-    console.error('Missing ERP credentials');
     return new Response(
       JSON.stringify({ success: false, error: 'Credenciais do ERP não configuradas' }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 
-  // Parse request body for date filters
   let startDate: string;
   let endDate: string;
   
@@ -170,142 +115,204 @@ serve(async (req) => {
     startDate = body.startDate;
     endDate = body.endDate;
   } catch {
-    // Default to current month if no body provided
     const now = new Date();
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
     startDate = `${firstDay.getDate().toString().padStart(2, '0')}/${(firstDay.getMonth() + 1).toString().padStart(2, '0')}/${firstDay.getFullYear()}`;
     endDate = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
   }
 
-  console.log(`[ERP] Buscando vendas de ${startDate} até ${endDate}`);
+  console.log('='.repeat(60));
+  console.log('[VALIDAÇÃO] Iniciando execução da edge function');
+  console.log('[VALIDAÇÃO] Período:', startDate, 'até', endDate);
+  console.log('='.repeat(60));
 
   try {
     // ============================================
-    // STEP 1: Authentication (GET with query params)
-    // IMPORTANT: Do NOT generate or override cookies/device_id.
-    // We capture ERPSession + device_id returned by the ERP and reuse them.
+    // STEP 1: LOGIN
     // ============================================
     const loginUrl = `${erpBaseUrl}/api/auth/login?email=${encodeURIComponent(erpEmail)}&password=${encodeURIComponent(erpPassword)}`;
 
-    console.log('[ERP] Autenticando...');
+    console.log('[LOGIN] URL:', loginUrl.replace(erpPassword, '***'));
+    console.log('[LOGIN] Method: GET');
 
     const loginResponse = await fetch(loginUrl, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        'User-Agent': 'Mozilla/5.0',
       },
     });
 
-    const loginText = await loginResponse.text();
-    console.log('[ERP] Login response status:', loginResponse.status);
-    
-    // Log all response headers for debugging
-    const loginHeaders: Record<string, string> = {};
+    console.log('[LOGIN] Response Status:', loginResponse.status);
+
+    // Captura TODOS os headers de resposta do login
+    console.log('[LOGIN] Response Headers:');
     loginResponse.headers.forEach((value, key) => {
-      loginHeaders[key] = value;
+      console.log(`  ${key}: ${value}`);
     });
-    console.log('[ERP] Login response headers:', JSON.stringify(loginHeaders));
+
+    const loginText = await loginResponse.text();
     
     let loginResult: ERPLoginResponse;
     try {
       loginResult = JSON.parse(loginText);
     } catch {
-      console.error('[ERP] Falha ao parsear resposta de login:', loginText.substring(0, 200));
+      console.error('[LOGIN] Resposta não é JSON:', loginText.substring(0, 300));
       return new Response(
-        JSON.stringify({ success: false, error: 'Resposta inválida do servidor ERP no login' }),
+        JSON.stringify({ success: false, error: 'Resposta inválida do ERP no login' }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     if (!loginResult.success || !loginResult.data?.token) {
-      console.error('[ERP] Login falhou:', JSON.stringify(loginResult));
+      console.error('[LOGIN] Falhou:', JSON.stringify(loginResult));
       return new Response(
-        JSON.stringify({ success: false, error: 'Falha na autenticação com o ERP. Verifique email e senha.' }),
+        JSON.stringify({ success: false, error: 'Falha na autenticação' }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const jwtToken = loginResult.data.token;
-    const { cookies: sessionCookies, cookieHeader, rawCookies } = extractAllCookies(loginResponse);
+    // ============================================
+    // EXTRAÇÃO DE COOKIES DO LOGIN
+    // ============================================
+    console.log('');
+    console.log('[COOKIES] Extraindo cookies do Set-Cookie do login...');
+    
+    // Método 1: getSetCookie (Deno/modern browsers)
+    const getSetCookieFn = (loginResponse.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie;
+    const setCookieList = getSetCookieFn ? getSetCookieFn() : [];
+    console.log('[COOKIES] getSetCookie() retornou:', setCookieList.length, 'cookies');
+    setCookieList.forEach((c, i) => console.log(`  [${i}]: ${c}`));
 
-    console.log('[ERP] Login OK. Usuário:', loginResult.data.user?.name);
-    console.log('[ERP] Token JWT (primeiros 50 chars):', jwtToken.substring(0, 50) + '...');
-    console.log('[ERP] Cookies capturados:', JSON.stringify(sessionCookies));
-    console.log('[ERP] Cookie header montado:', cookieHeader);
+    // Método 2: get('set-cookie') - fallback
+    const rawSetCookie = loginResponse.headers.get('set-cookie');
+    console.log('[COOKIES] headers.get("set-cookie"):', rawSetCookie);
 
-    if (!sessionCookies.ERPSession || !sessionCookies.device_id) {
-      console.warn('[ERP] Cookies incompletos no login. Raw cookies:', JSON.stringify(rawCookies));
+    // Usar o que tiver dados
+    const allCookieHeaders = setCookieList.length > 0 ? setCookieList : (rawSetCookie ? [rawSetCookie] : []);
+    
+    // Extrair valores SEM modificar
+    let erpSessionValue: string | null = null;
+    let deviceIdValue: string | null = null;
+    
+    for (const cookieStr of allCookieHeaders) {
+      const erpMatch = cookieStr.match(/ERPSession=([^;]+)/);
+      if (erpMatch) {
+        erpSessionValue = erpMatch[1];
+        console.log('[COOKIES] ERPSession extraído DIRETAMENTE do Set-Cookie:', erpSessionValue);
+      }
+      const deviceMatch = cookieStr.match(/device_id=([^;]+)/);
+      if (deviceMatch) {
+        deviceIdValue = deviceMatch[1];
+        console.log('[COOKIES] device_id extraído DIRETAMENTE do Set-Cookie:', deviceIdValue);
+      }
+    }
+
+    console.log('');
+    console.log('[VALIDAÇÃO] Confirmações:');
+    console.log('  - ERPSession extraído do login (sem modificação):', erpSessionValue ? 'SIM' : 'NÃO');
+    console.log('  - device_id extraído do login (sem modificação):', deviceIdValue ? 'SIM' : 'NÃO');
+    console.log('  - device_id está sendo recriado em algum ponto?: NÃO (só usamos o do login)');
+    console.log('  - Login e vendas na MESMA execução?: SIM (mesma chamada da edge function)');
+
+    if (!erpSessionValue || !deviceIdValue) {
+      console.error('[COOKIES] FALHA: Cookies incompletos!');
       return new Response(
         JSON.stringify({
           success: false,
-          error: 'Sessão do ERP incompleta: ERPSession/device_id ausentes no login',
-          debug: { rawCookies },
+          error: 'Sessão incompleta: ERPSession ou device_id ausentes',
+          debug: {
+            setCookieCount: allCookieHeaders.length,
+            rawCookies: allCookieHeaders,
+          }
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     // ============================================
-    // STEP 2: Fetch Sales (POST with Bearer token)
-    // Spec: Authorization: Bearer + Cookie: ERPSession + device_id (same as login)
-    // The ERP validates the combination of: JWT + ERPSession + device_id
+    // MONTAGEM DO HEADER COOKIE PARA O POST
+    // ============================================
+    const jwtToken = loginResult.data.token;
+    const cookieHeader = `ERPSession=${erpSessionValue}; device_id=${deviceIdValue}`;
+    
+    console.log('');
+    console.log('[VALIDAÇÃO] JWT extraído de data.token:', jwtToken.substring(0, 50) + '...');
+    console.log('[VALIDAÇÃO] Cookie header montado MANUALMENTE:', cookieHeader);
+    console.log('[VALIDAÇÃO] Formato do Cookie:', 'ERPSession=<valor>; device_id=<valor>');
+
+    // ============================================
+    // STEP 2: POST DE VENDAS
     // ============================================
     const salesUrl = `${erpBaseUrl}/api/vendas/vendasEmissorExpandido`;
-
-    // Headers must match exactly what a browser would send
-    const salesHeaders = new Headers();
-    salesHeaders.set('Content-Type', 'application/json');
-    salesHeaders.set('Accept', 'application/json');
-    salesHeaders.set('Authorization', `Bearer ${jwtToken}`);
-    salesHeaders.set('Cookie', cookieHeader);
-    salesHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    salesHeaders.set('Accept-Language', 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7');
-    salesHeaders.set('Origin', erpBaseUrl);
-    salesHeaders.set('Referer', `${erpBaseUrl}/`);
-
-    const salesBody = {
+    const salesBody = JSON.stringify({
       StartDate: startDate,
       EndDate: endDate,
-    };
-
-    console.log('[ERP] Buscando vendas...', JSON.stringify(salesBody));
-    
-    // Log the exact headers being sent
-    const headersObj: Record<string, string> = {};
-    salesHeaders.forEach((value, key) => {
-      headersObj[key] = key.toLowerCase() === 'authorization' 
-        ? `Bearer ${jwtToken.substring(0, 20)}...` 
-        : value;
     });
-    console.log('[ERP] Headers enviados:', JSON.stringify(headersObj));
+
+    console.log('');
+    console.log('='.repeat(60));
+    console.log('[VENDAS] REQUEST COMPLETO DO POST:');
+    console.log('='.repeat(60));
+    console.log('[VENDAS] URL:', salesUrl);
+    console.log('[VENDAS] Method: POST');
+    console.log('[VENDAS] Headers:');
+    console.log('  Content-Type: application/json');
+    console.log('  Accept: application/json');
+    console.log(`  Authorization: Bearer ${jwtToken.substring(0, 30)}...`);
+    console.log(`  Cookie: ${cookieHeader}`);
+    console.log('  User-Agent: Mozilla/5.0');
+    console.log('[VENDAS] Body:', salesBody);
+    console.log('='.repeat(60));
+
+    // Confirmar que Authorization está no formato correto
+    const authHeader = `Bearer ${jwtToken}`;
+    console.log('[VALIDAÇÃO] Authorization header formato:', authHeader.startsWith('Bearer ') ? 'Bearer <JWT> ✓' : 'INCORRETO');
 
     const salesResponse = await fetch(salesUrl, {
       method: 'POST',
-      headers: salesHeaders,
-      body: JSON.stringify(salesBody),
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': authHeader,
+        'Cookie': cookieHeader,
+        'User-Agent': 'Mozilla/5.0',
+      },
+      body: salesBody,
+    });
+
+    console.log('');
+    console.log('[VENDAS] Response Status:', salesResponse.status);
+    console.log('[VENDAS] Response Headers:');
+    salesResponse.headers.forEach((value, key) => {
+      console.log(`  ${key}: ${value}`);
     });
 
     const salesText = await salesResponse.text();
-    console.log('[ERP] Sales response status:', salesResponse.status);
-    
-    // Log sales response headers for debugging
-    const salesRespHeaders: Record<string, string> = {};
-    salesResponse.headers.forEach((value, key) => {
-      salesRespHeaders[key] = value;
-    });
-    console.log('[ERP] Sales response headers:', JSON.stringify(salesRespHeaders));
+    console.log('[VENDAS] Response Body (primeiros 500 chars):', salesText.substring(0, 500));
+
+    // ============================================
+    // CONFIRMAÇÃO FINAL
+    // ============================================
+    console.log('');
+    console.log('='.repeat(60));
+    console.log('[VALIDAÇÃO FINAL]');
+    console.log('='.repeat(60));
+    console.log('1. Cookie header montado manualmente no POST: SIM');
+    console.log(`2. Cookie contém ERPSession=${erpSessionValue.substring(0, 10)}...: SIM`);
+    console.log(`3. Cookie contém device_id=${deviceIdValue.substring(0, 10)}...: SIM`);
+    console.log('4. Valores vêm do Set-Cookie do login sem modificação: SIM');
+    console.log('5. device_id NÃO está sendo recriado: SIM');
+    console.log('6. Login e vendas na MESMA execução: SIM');
+    console.log('7. Authorization: Bearer <JWT>: SIM');
+    console.log(`8. ERP retornou status ${salesResponse.status} com todos os itens acima: ${salesResponse.status === 400 ? 'SIM - ERRO 400' : 'NÃO'}`);
+    console.log('='.repeat(60));
 
     if (!salesResponse.ok) {
-      console.error('[ERP] Erro na busca de vendas:', salesText);
-      
-      let errorMessage = 'Erro ao buscar vendas do ERP';
+      let errorMessage = 'Erro ao buscar vendas';
       try {
         const errorParsed = JSON.parse(salesText);
-        if (typeof errorParsed?.data === 'string') errorMessage = errorParsed.data;
-        else if (typeof errorParsed?.error === 'string') errorMessage = errorParsed.error;
-        else if (typeof errorParsed?.message === 'string') errorMessage = errorParsed.message;
+        errorMessage = errorParsed?.data || errorParsed?.error || errorParsed?.message || errorMessage;
       } catch {
         if (salesText.length < 200) errorMessage = salesText;
       }
@@ -315,9 +322,12 @@ serve(async (req) => {
           success: false, 
           error: errorMessage,
           httpStatus: salesResponse.status,
-          debug: {
-            cookiesSent: cookieHeader,
-            tokenPrefix: jwtToken.substring(0, 30),
+          validation: {
+            cookieHeaderSent: cookieHeader,
+            authHeaderFormat: 'Bearer <JWT>',
+            sameExecution: true,
+            cookiesFromLogin: true,
+            deviceIdNotRegenerated: true,
           }
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -328,18 +338,16 @@ serve(async (req) => {
     try {
       salesResult = JSON.parse(salesText);
     } catch {
-      console.error('[ERP] Falha ao parsear vendas:', salesText.substring(0, 200));
       return new Response(
-        JSON.stringify({ success: false, error: 'Resposta inválida do servidor ERP na busca de vendas' }),
+        JSON.stringify({ success: false, error: 'Resposta inválida do ERP' }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Transform the data to dashboard format
     const erpData = salesResult.data || salesResult;
     const transformedData = transformERPData(erpData as Record<string, ERPSaleItem>);
     
-    console.log(`[ERP] Sucesso! ${transformedData.length} registros carregados`);
+    console.log(`[VENDAS] Sucesso! ${transformedData.length} registros`);
 
     return new Response(
       JSON.stringify({ 
@@ -353,10 +361,9 @@ serve(async (req) => {
     );
 
   } catch (error: unknown) {
-    console.error('[ERP] Erro geral:', error);
-    const message = error instanceof Error ? error.message : 'Erro interno do servidor';
+    console.error('[ERRO]', error);
     return new Response(
-      JSON.stringify({ success: false, error: message }),
+      JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Erro interno' }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
