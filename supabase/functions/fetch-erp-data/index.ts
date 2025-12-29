@@ -131,9 +131,11 @@ function formatDate(date: Date): string {
 // ERP API limit - if we hit this, we need finer pagination
 const ERP_API_LIMIT = 5000;
 
-// Concurrency limits (tuned for performance vs rate limiting)
-const MONTH_CONCURRENCY = 6;
-const WEEK_CONCURRENCY = 4;
+// Sequential mode: one request at a time with delays to reduce server load
+const SEQUENTIAL_DELAY_MS = 1000; // 1 second delay between requests
+
+// Helper function for delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Generate weekly periods for a given month
 function generateWeeklyPeriods(monthStart: Date, monthEnd: Date): Array<{ start: string; end: string }> {
@@ -382,12 +384,22 @@ serve(async (req) => {
     const shouldPaginate = usePagination && isLargeDateRange(startDate, endDate);
     
     if (shouldPaginate) {
-      // Use monthly pagination with parallel requests
+      // Use SEQUENTIAL monthly pagination with delays to reduce server load
       const periods = generateMonthlyPeriods(startDate, endDate);
-      console.log(`[ERP] Usando paginação mensal paralela: ${periods.length} períodos`);
+      console.log(`[ERP] Usando paginação mensal SEQUENCIAL: ${periods.length} períodos (delay de ${SEQUENTIAL_DELAY_MS}ms)`);
       
-      // Helper function to fetch a single month with weekly fallback
-      const fetchMonthData = async (period: { start: string; end: string }): Promise<TransformedSaleRow[]> => {
+      // Process months one at a time with delay between each
+      for (let monthIdx = 0; monthIdx < periods.length; monthIdx++) {
+        const period = periods[monthIdx];
+        
+        // Add delay between requests (except for the first one)
+        if (monthIdx > 0) {
+          console.log(`[ERP] Aguardando ${SEQUENTIAL_DELAY_MS}ms antes do próximo mês...`);
+          await delay(SEQUENTIAL_DELAY_MS);
+        }
+        
+        console.log(`[ERP] Buscando mês ${monthIdx + 1}/${periods.length}: ${period.start} - ${period.end}`);
+        
         const result = await fetchSalesForPeriod(
           erpBaseUrl,
           authResult.token!,
@@ -397,59 +409,46 @@ serve(async (req) => {
         );
         
         if (result.success && result.data) {
-          // Check if we hit the API limit - if so, use weekly pagination
+          // Check if we hit the API limit - if so, use weekly pagination (also sequential)
           if (result.data.length >= ERP_API_LIMIT) {
-            console.log(`[ERP] Limite atingido em ${period.start}-${period.end}, usando paginação semanal...`);
+            console.log(`[ERP] Limite atingido em ${period.start}-${period.end}, usando paginação semanal sequencial...`);
             
             const monthStart = parseDate(period.start);
             const monthEnd = parseDate(period.end);
             const weeklyPeriods = generateWeeklyPeriods(monthStart, monthEnd);
             
-            // Fetch weeks in parallel (limited concurrency to avoid rate limiting)
-            const weekResults: TransformedSaleRow[] = [];
-            for (let i = 0; i < weeklyPeriods.length; i += WEEK_CONCURRENCY) {
-              const batch = weeklyPeriods.slice(i, i + WEEK_CONCURRENCY);
-              const batchResults = await Promise.all(
-                batch.map(weekPeriod =>
-                  fetchSalesForPeriod(
-                    erpBaseUrl,
-                    authResult.token!,
-                    authResult.cookies!,
-                    weekPeriod.start,
-                    weekPeriod.end
-                  )
-                )
+            // Fetch weeks one at a time with delay
+            for (let weekIdx = 0; weekIdx < weeklyPeriods.length; weekIdx++) {
+              const weekPeriod = weeklyPeriods[weekIdx];
+              
+              // Add delay between weekly requests
+              if (weekIdx > 0) {
+                await delay(SEQUENTIAL_DELAY_MS);
+              }
+              
+              const weekResult = await fetchSalesForPeriod(
+                erpBaseUrl,
+                authResult.token!,
+                authResult.cookies!,
+                weekPeriod.start,
+                weekPeriod.end
               );
               
-              for (let j = 0; j < batchResults.length; j++) {
-                const weekResult = batchResults[j];
-                if (weekResult.success && weekResult.data) {
-                  weekResults.push(...weekResult.data);
-                  if (weekResult.data.length >= ERP_API_LIMIT) {
-                    console.warn(`[ERP] AVISO: Limite atingido na semana ${batch[j].start}-${batch[j].end}. Dados podem estar incompletos.`);
-                  }
+              if (weekResult.success && weekResult.data) {
+                allData.push(...weekResult.data);
+                if (weekResult.data.length >= ERP_API_LIMIT) {
+                  console.warn(`[ERP] AVISO: Limite atingido na semana ${weekPeriod.start}-${weekPeriod.end}. Dados podem estar incompletos.`);
                 }
               }
             }
             
-            console.log(`[ERP] Período ${period.start}-${period.end} com paginação semanal: ${weekResults.length} registros`);
-            return weekResults;
+            console.log(`[ERP] Mês ${period.start}-${period.end} com paginação semanal: ${allData.length} registros acumulados`);
           } else {
-            console.log(`[ERP] Período ${period.start}-${period.end}: ${result.data.length} registros`);
-            return result.data;
+            allData.push(...result.data);
+            console.log(`[ERP] Mês ${period.start}-${period.end}: ${result.data.length} registros (total: ${allData.length})`);
           }
         } else {
           console.error(`[ERP] Erro no período ${period.start}-${period.end}:`, result.error);
-          return [];
-        }
-      };
-      
-      // Fetch months in parallel (limited concurrency to avoid rate limiting/timeouts)
-      for (let i = 0; i < periods.length; i += MONTH_CONCURRENCY) {
-        const batch = periods.slice(i, i + MONTH_CONCURRENCY);
-        const batchResults = await Promise.all(batch.map(fetchMonthData));
-        for (const monthData of batchResults) {
-          allData.push(...monthData);
         }
       }
       
@@ -478,36 +477,36 @@ serve(async (req) => {
         );
       }
       
-      // If we hit the limit even for short periods, use weekly pagination
+      // If we hit the limit even for short periods, use weekly pagination (sequential)
       if (result.data && result.data.length >= ERP_API_LIMIT) {
-        console.log(`[ERP] Limite atingido em período curto ${startDate}-${endDate}, usando paginação semanal...`);
+        console.log(`[ERP] Limite atingido em período curto ${startDate}-${endDate}, usando paginação semanal sequencial...`);
         
         const periodStart = parseDate(startDate);
         const periodEnd = parseDate(endDate);
         const weeklyPeriods = generateWeeklyPeriods(periodStart, periodEnd);
         
+        // Fetch weeks one at a time with delay
         const weekResults: TransformedSaleRow[] = [];
-        for (let i = 0; i < weeklyPeriods.length; i += WEEK_CONCURRENCY) {
-          const batch = weeklyPeriods.slice(i, i + WEEK_CONCURRENCY);
-          const batchResults = await Promise.all(
-            batch.map(weekPeriod =>
-              fetchSalesForPeriod(
-                erpBaseUrl,
-                authResult.token!,
-                authResult.cookies!,
-                weekPeriod.start,
-                weekPeriod.end
-              )
-            )
+        for (let weekIdx = 0; weekIdx < weeklyPeriods.length; weekIdx++) {
+          const weekPeriod = weeklyPeriods[weekIdx];
+          
+          // Add delay between weekly requests
+          if (weekIdx > 0) {
+            await delay(SEQUENTIAL_DELAY_MS);
+          }
+          
+          const weekResult = await fetchSalesForPeriod(
+            erpBaseUrl,
+            authResult.token!,
+            authResult.cookies!,
+            weekPeriod.start,
+            weekPeriod.end
           );
           
-          for (let j = 0; j < batchResults.length; j++) {
-            const weekResult = batchResults[j];
-            if (weekResult.success && weekResult.data) {
-              weekResults.push(...weekResult.data);
-              if (weekResult.data.length >= ERP_API_LIMIT) {
-                console.warn(`[ERP] AVISO: Limite atingido na semana ${batch[j].start}-${batch[j].end}. Dados podem estar incompletos.`);
-              }
+          if (weekResult.success && weekResult.data) {
+            weekResults.push(...weekResult.data);
+            if (weekResult.data.length >= ERP_API_LIMIT) {
+              console.warn(`[ERP] AVISO: Limite atingido na semana ${weekPeriod.start}-${weekPeriod.end}. Dados podem estar incompletos.`);
             }
           }
         }
