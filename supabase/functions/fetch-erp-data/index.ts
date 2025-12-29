@@ -10,7 +10,22 @@ interface SalesRequestBody {
   endDate: string;   // DD/MM/YYYY format
 }
 
-// Transform ERP data to match the expected format
+// ERP Response types
+interface ERPLoginResponse {
+  success: boolean;
+  status: string;
+  data?: {
+    token: string;
+    user: {
+      id: number;
+      empresaId: number;
+      grupoId: number;
+      name: string;
+      email: string;
+    };
+  };
+}
+
 interface ERPSaleItem {
   Empresa: string;
   Empresa_Id: number;
@@ -37,6 +52,7 @@ interface ERPSaleItem {
   ResumoVenda: string;
 }
 
+// Dashboard mapping - transformed data structure
 interface TransformedSaleRow {
   Filial: string;
   Emissor: string;
@@ -72,9 +88,21 @@ function transformERPData(erpData: Record<string, ERPSaleItem>): TransformedSale
     Líquido: item.LiquidoItem,
     Comissão: item.Comissao,
     Custo: item.CustoTotalItem,
-    Lucro: item.LucroItem,
+    Lucro: item.LiquidoItem - item.CustoTotalItem,
     '% Lucro': item.PercLucroItem,
   }));
+}
+
+// Extract cookies from Set-Cookie header(s)
+function extractCookies(response: Response): string {
+  const setCookieList =
+    (response.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
+  const rawSetCookie = response.headers.get('set-cookie');
+  
+  return (setCookieList.length ? setCookieList : rawSetCookie ? [rawSetCookie] : [])
+    .map((c) => c.split(';')[0].trim())
+    .filter(Boolean)
+    .join('; ');
 }
 
 serve(async (req) => {
@@ -83,162 +111,169 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const erpBaseUrl = Deno.env.get('ERP_API_URL');
+  const erpEmail = Deno.env.get('ERP_API_EMAIL');
+  const erpPassword = Deno.env.get('ERP_API_PASSWORD');
+
+  if (!erpBaseUrl || !erpEmail || !erpPassword) {
+    console.error('Missing ERP credentials');
+    return new Response(
+      JSON.stringify({ success: false, error: 'Credenciais do ERP não configuradas' }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // Parse request body for date filters
+  let startDate: string;
+  let endDate: string;
+  
   try {
-    const erpUrl = Deno.env.get('ERP_API_URL');
-    const erpEmail = Deno.env.get('ERP_API_EMAIL');
-    const erpPassword = Deno.env.get('ERP_API_PASSWORD');
+    const body: SalesRequestBody = await req.json();
+    startDate = body.startDate;
+    endDate = body.endDate;
+  } catch {
+    // Default to current month if no body provided
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    startDate = `${firstDay.getDate().toString().padStart(2, '0')}/${(firstDay.getMonth() + 1).toString().padStart(2, '0')}/${firstDay.getFullYear()}`;
+    endDate = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
+  }
 
-    if (!erpUrl || !erpEmail || !erpPassword) {
-      console.error('Missing ERP credentials');
-      return new Response(
-        JSON.stringify({ error: 'ERP credentials not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+  console.log(`[ERP] Buscando vendas de ${startDate} até ${endDate}`);
 
-    // Parse request body for date filters
-    let startDate: string;
-    let endDate: string;
+  try {
+    // ============================================
+    // STEP 1: Authentication (GET with query params)
+    // ============================================
+    const loginUrl = `${erpBaseUrl}/api/auth/login?email=${encodeURIComponent(erpEmail)}&password=${encodeURIComponent(erpPassword)}`;
     
-    try {
-      const body: SalesRequestBody = await req.json();
-      startDate = body.startDate;
-      endDate = body.endDate;
-    } catch {
-      // Default to current month if no body provided
-      const now = new Date();
-      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-      startDate = `${firstDay.getDate().toString().padStart(2, '0')}/${(firstDay.getMonth() + 1).toString().padStart(2, '0')}/${firstDay.getFullYear()}`;
-      endDate = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
-    }
-
-    console.log(`Fetching sales data from ${startDate} to ${endDate}`);
-
-    // Step 1: Authenticate with the ERP API
-    const loginUrl = `${erpUrl}/api/auth/login?email=${encodeURIComponent(erpEmail)}&password=${encodeURIComponent(erpPassword)}`;
-    
-    console.log('Authenticating with ERP API...');
+    console.log('[ERP] Autenticando...');
     
     const loginResponse = await fetch(loginUrl, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (compatible; SalesOps/1.0)',
       },
     });
 
-    if (!loginResponse.ok) {
-      console.error('ERP login failed:', loginResponse.status, loginResponse.statusText);
+    const loginText = await loginResponse.text();
+    console.log('[ERP] Login response status:', loginResponse.status);
+    
+    let loginResult: ERPLoginResponse;
+    try {
+      loginResult = JSON.parse(loginText);
+    } catch {
+      console.error('[ERP] Falha ao parsear resposta de login:', loginText.substring(0, 200));
       return new Response(
-        JSON.stringify({ error: 'Failed to authenticate with ERP API' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: 'Resposta inválida do servidor ERP no login' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const loginResult = await loginResponse.json();
-    
     if (!loginResult.success || !loginResult.data?.token) {
-      console.error('ERP login failed: no token received');
+      console.error('[ERP] Login falhou:', JSON.stringify(loginResult));
       return new Response(
-        JSON.stringify({ error: 'Failed to get authentication token from ERP API' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: 'Falha na autenticação com o ERP. Verifique email e senha.' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const authToken = loginResult.data.token;
-    console.log('ERP login successful, token:', authToken.substring(0, 20) + '...');
-
-    // Extract cookies properly (Set-Cookie includes attributes; Cookie header must be just name=value pairs)
-    const setCookieList =
-      (loginResponse.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
-    const rawSetCookie = loginResponse.headers.get('set-cookie');
-    const cookieHeader = (setCookieList.length ? setCookieList : rawSetCookie ? [rawSetCookie] : [])
-      .map((c) => c.split(';')[0].trim())
-      .filter(Boolean)
-      .join('; ');
-
-    console.log('Cookie header prepared:', cookieHeader ? cookieHeader : 'None');
-    console.log('Session established, fetching sales data...');
-
-    // Step 2: Fetch sales data using the vendasEmissorExpandido endpoint
-    const salesUrl = `${erpUrl}/api/vendas/vendasEmissorExpandido`;
+    const jwtToken = loginResult.data.token;
+    const cookieHeader = extractCookies(loginResponse);
     
-    // Build request headers - use Bearer token format as confirmed by user
+    console.log('[ERP] Login OK. Usuário:', loginResult.data.user?.name);
+    console.log('[ERP] Cookies extraídos:', cookieHeader ? 'Sim' : 'Não');
+
+    // ============================================
+    // STEP 2: Fetch Sales (POST with Bearer token)
+    // ============================================
+    const salesUrl = `${erpBaseUrl}/api/vendas/vendasEmissorExpandido`;
+    
     const salesHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      'Authorization': `Bearer ${authToken}`,
-      'User-Agent': 'Mozilla/5.0 (compatible; LovableBot/1.0)',
+      'Authorization': `Bearer ${jwtToken}`,
+      'User-Agent': 'Mozilla/5.0 (compatible; SalesOps/1.0)',
     };
     
-    // Add cookies if available
     if (cookieHeader) {
       salesHeaders['Cookie'] = cookieHeader;
     }
-    
-    console.log('Request headers (without auth token):', JSON.stringify({
-      ...salesHeaders,
-      'Authorization': '[REDACTED]',
-    }));
-    console.log('Request body:', JSON.stringify({ StartDate: startDate, EndDate: endDate }));
+
+    const salesBody = {
+      StartDate: startDate,
+      EndDate: endDate,
+    };
+
+    console.log('[ERP] Buscando vendas...', JSON.stringify(salesBody));
 
     const salesResponse = await fetch(salesUrl, {
       method: 'POST',
       headers: salesHeaders,
-      body: JSON.stringify({
-        StartDate: startDate,
-        EndDate: endDate,
-      }),
+      body: JSON.stringify(salesBody),
     });
 
+    const salesText = await salesResponse.text();
+    console.log('[ERP] Sales response status:', salesResponse.status);
+
     if (!salesResponse.ok) {
-      const errorText = await salesResponse.text();
-      console.error('ERP sales fetch failed:', salesResponse.status, errorText);
-
-      let message = 'Falha ao buscar vendas no ERP';
+      console.error('[ERP] Erro na busca de vendas:', salesText.substring(0, 500));
+      
+      let errorMessage = 'Erro ao buscar vendas do ERP';
       try {
-        const parsed = JSON.parse(errorText);
-        if (typeof parsed?.data === 'string' && parsed.data.trim()) message = parsed.data;
-        else if (typeof parsed?.error === 'string' && parsed.error.trim()) message = parsed.error;
+        const errorParsed = JSON.parse(salesText);
+        if (typeof errorParsed?.data === 'string') errorMessage = errorParsed.data;
+        else if (typeof errorParsed?.error === 'string') errorMessage = errorParsed.error;
+        else if (typeof errorParsed?.message === 'string') errorMessage = errorParsed.message;
       } catch {
-        if (errorText?.trim()) message = errorText;
+        if (salesText.length < 200) errorMessage = salesText;
       }
-
-      // Return 200 so the frontend can read the error message (Supabase SDK treats non-2xx as opaque)
+      
       return new Response(
-        JSON.stringify({
-          success: false,
-          error: message,
-          upstreamStatus: salesResponse.status,
+        JSON.stringify({ 
+          success: false, 
+          error: errorMessage,
+          httpStatus: salesResponse.status,
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const salesResult = await salesResponse.json();
-    console.log('Sales data fetched successfully');
+    let salesResult: { data?: Record<string, ERPSaleItem>; success?: boolean };
+    try {
+      salesResult = JSON.parse(salesText);
+    } catch {
+      console.error('[ERP] Falha ao parsear vendas:', salesText.substring(0, 200));
+      return new Response(
+        JSON.stringify({ success: false, error: 'Resposta inválida do servidor ERP na busca de vendas' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
-    // Transform the data to the expected format
+    // Transform the data to dashboard format
     const erpData = salesResult.data || salesResult;
-    const transformedData = transformERPData(erpData);
+    const transformedData = transformERPData(erpData as Record<string, ERPSaleItem>);
     
-    console.log(`Transformed ${transformedData.length} sales records`);
+    console.log(`[ERP] Sucesso! ${transformedData.length} registros carregados`);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         data: transformedData,
         count: transformedData.length,
-        period: { startDate, endDate }
+        period: { startDate, endDate },
+        user: loginResult.data.user?.name,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error: unknown) {
-    console.error('Error in fetch-erp-data:', error);
-    const message = error instanceof Error ? error.message : 'Internal server error';
+    console.error('[ERP] Erro geral:', error);
+    const message = error instanceof Error ? error.message : 'Erro interno do servidor';
     return new Response(
-      JSON.stringify({ error: message }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ success: false, error: message }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
