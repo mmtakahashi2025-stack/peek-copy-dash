@@ -157,29 +157,24 @@ export function useErpCache() {
     }
   }, [user]);
 
-  // Save a single month to Supabase cache
+  // Save a single month to Supabase cache using upsert to avoid duplicate key errors
   const saveMonthToCache = useCallback(async (year: number, month: number, data: RawSaleRow[]): Promise<void> => {
     if (!user) return;
 
     try {
-      // First, try to delete existing entry
-      await supabase
-        .from('erp_cache')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('year', year)
-        .eq('month', month);
-      
-      // Then insert new entry - use type assertion for the insert
+      // Use upsert to handle both insert and update in a single operation
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error } = await (supabase
         .from('erp_cache') as any)
-        .insert({
+        .upsert({
           user_id: user.id,
           year,
           month,
           data: data,
           record_count: data.length,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id,year,month',
         });
 
       if (error) {
