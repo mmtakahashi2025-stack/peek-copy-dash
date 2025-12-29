@@ -147,26 +147,28 @@ serve(async (req) => {
     const authToken = loginResult.data.token;
     console.log('ERP login successful, token:', authToken.substring(0, 20) + '...');
 
-    // Extract session cookies - this is important for the ERP API
-    const cookies = loginResponse.headers.get('set-cookie');
-    console.log('Cookies received:', cookies ? 'Yes' : 'No');
-    
+    // Extract cookies properly (Set-Cookie includes attributes; Cookie header must be just name=value pairs)
+    const setCookieList =
+      (loginResponse.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
+    const rawSetCookie = loginResponse.headers.get('set-cookie');
+    const cookieHeader = (setCookieList.length ? setCookieList : rawSetCookie ? [rawSetCookie] : [])
+      .map((c) => c.split(';')[0].trim())
+      .filter(Boolean)
+      .join('; ');
+
+    console.log('Cookie header prepared:', cookieHeader ? cookieHeader : 'None');
     console.log('Session established, fetching sales data...');
 
     // Step 2: Fetch sales data using the vendasEmissorExpandido endpoint
-    // According to user's example, Authorization header should be the raw token (marked as ••••••)
     const salesUrl = `${erpUrl}/api/vendas/vendasEmissorExpandido`;
-    
-    console.log('Calling sales endpoint:', salesUrl);
-    console.log('Request body:', JSON.stringify({ StartDate: startDate, EndDate: endDate }));
-    
+
     const salesResponse = await fetch(salesUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         'Authorization': authToken,
-        ...(cookies ? { 'Cookie': cookies } : {}),
+        ...(cookieHeader ? { 'Cookie': cookieHeader } : {}),
       },
       body: JSON.stringify({
         StartDate: startDate,
