@@ -10,6 +10,73 @@ interface SalesRequestBody {
   endDate: string;   // DD/MM/YYYY format
 }
 
+// Transform ERP data to match the expected format
+interface ERPSaleItem {
+  Empresa: string;
+  Empresa_Id: number;
+  Venda_Id: number;
+  CanalVenda_Id: number;
+  Usuario_Id: number;
+  Emissor: string;
+  DataStatus: string;
+  Situacao: string;
+  ProdutoTipo: string;
+  ItemDescricao: string;
+  Produto_Id: number;
+  Qtde: number;
+  ValorUnitario: number;
+  BrutoItem: number;
+  DescontosVenda: number;
+  TotalBrutoVenda: number;
+  RateioDesconto: number;
+  LiquidoItem: number;
+  Comissao: number;
+  CustoTotalItem: number;
+  LucroItem: number;
+  PercLucroItem: number;
+  ResumoVenda: string;
+}
+
+interface TransformedSaleRow {
+  Filial: string;
+  Emissor: string;
+  'Venda #': number;
+  'Data Venda': string;
+  'Resumo Recebimentos': string;
+  Item: string;
+  Tipo: string;
+  Quantidade: number;
+  'Valor Unitário': number;
+  Bruto: number;
+  'Desc. (rateio)': number;
+  Líquido: number;
+  Comissão: number;
+  Custo: number;
+  Lucro: number;
+  '% Lucro': number;
+}
+
+function transformERPData(erpData: Record<string, ERPSaleItem>): TransformedSaleRow[] {
+  return Object.values(erpData).map((item) => ({
+    Filial: item.Empresa,
+    Emissor: item.Emissor,
+    'Venda #': item.Venda_Id,
+    'Data Venda': item.DataStatus,
+    'Resumo Recebimentos': item.ResumoVenda,
+    Item: item.ItemDescricao,
+    Tipo: item.ProdutoTipo,
+    Quantidade: item.Qtde,
+    'Valor Unitário': item.ValorUnitario,
+    Bruto: item.BrutoItem,
+    'Desc. (rateio)': item.RateioDesconto,
+    Líquido: item.LiquidoItem,
+    Comissão: item.Comissao,
+    Custo: item.CustoTotalItem,
+    Lucro: item.LucroItem,
+    '% Lucro': item.PercLucroItem,
+  }));
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -67,12 +134,21 @@ serve(async (req) => {
       );
     }
 
-    const loginData = await loginResponse.json();
+    const loginResult = await loginResponse.json();
+    
+    if (!loginResult.success || !loginResult.data?.token) {
+      console.error('ERP login failed: no token received');
+      return new Response(
+        JSON.stringify({ error: 'Failed to get authentication token from ERP API' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const authToken = loginResult.data.token;
     console.log('ERP login successful');
 
-    // Extract session cookie and authorization token
+    // Extract session cookies
     const cookies = loginResponse.headers.get('set-cookie');
-    const authToken = loginData.token || loginData.access_token || loginData.authorization;
     
     console.log('Session established, fetching sales data...');
 
@@ -84,7 +160,7 @@ serve(async (req) => {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'Authorization': authToken || '',
+        'Authorization': authToken,
         'Cookie': cookies || '',
       },
       body: JSON.stringify({
@@ -94,20 +170,28 @@ serve(async (req) => {
     });
 
     if (!salesResponse.ok) {
-      console.error('ERP sales fetch failed:', salesResponse.status, await salesResponse.text());
+      const errorText = await salesResponse.text();
+      console.error('ERP sales fetch failed:', salesResponse.status, errorText);
       return new Response(
         JSON.stringify({ error: 'Failed to fetch sales data from ERP API' }),
         { status: salesResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const salesData = await salesResponse.json();
+    const salesResult = await salesResponse.json();
     console.log('Sales data fetched successfully');
+
+    // Transform the data to the expected format
+    const erpData = salesResult.data || salesResult;
+    const transformedData = transformERPData(erpData);
+    
+    console.log(`Transformed ${transformedData.length} sales records`);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        data: salesData,
+        data: transformedData,
+        count: transformedData.length,
         period: { startDate, endDate }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
