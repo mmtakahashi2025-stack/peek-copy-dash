@@ -162,11 +162,11 @@ serve(async (req) => {
     // Step 2: Fetch sales data using the vendasEmissorExpandido endpoint
     const salesUrl = `${erpUrl}/api/vendas/vendasEmissorExpandido`;
     
-    // Build request headers matching the original axios example
+    // Build request headers - use Bearer token format as confirmed by user
     const salesHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      'Authorization': authToken,
+      'Authorization': `Bearer ${authToken}`,
       'User-Agent': 'Mozilla/5.0 (compatible; LovableBot/1.0)',
     };
     
