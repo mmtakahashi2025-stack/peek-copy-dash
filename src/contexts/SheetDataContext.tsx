@@ -334,8 +334,13 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         throw new Error(funcError.message || 'Erro ao buscar dados do ERP');
       }
 
-      if (response?.error) {
-        throw new Error(response.error);
+      // Check for success flag in response (new format)
+      if (response?.success === false) {
+        throw new Error(response.error || 'Erro desconhecido do ERP');
+      }
+
+      if (!response?.data || !Array.isArray(response.data)) {
+        throw new Error('Resposta inválida do ERP - dados não encontrados');
       }
 
       const data = response.data as RawSaleRow[];
