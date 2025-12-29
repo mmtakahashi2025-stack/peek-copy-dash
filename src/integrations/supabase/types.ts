@@ -220,6 +220,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      decrypt_erp_password: {
+        Args: { encrypted_password: string }
+        Returns: string
+      }
+      encrypt_erp_password: {
+        Args: { plain_password: string }
+        Returns: string
+      }
+      get_erp_password: { Args: { target_user_id: string }; Returns: string }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -228,6 +237,10 @@ export type Database = {
         Returns: boolean
       }
       is_admin_or_manager: { Args: never; Returns: boolean }
+      save_erp_password: {
+        Args: { plain_password: string; target_user_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       app_role: "admin" | "manager" | "employee"

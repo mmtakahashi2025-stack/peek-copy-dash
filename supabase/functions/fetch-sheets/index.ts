@@ -6,6 +6,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Security limits
+const MAX_URL_LENGTH = 2048;
+const MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB
+const FETCH_TIMEOUT_MS = 30000; // 30 seconds
+
 interface SheetRow {
   [key: string]: string | number;
 }
@@ -38,12 +43,58 @@ function parseDelimited(text: string, delimiter: string = ','): SheetRow[] {
 
 // Validate that URL is a Google Sheets URL to prevent SSRF attacks
 function isValidGoogleSheetsUrl(url: string): boolean {
+  // Check URL length first
+  if (url.length > MAX_URL_LENGTH) {
+    console.error('URL exceeds maximum length:', url.length);
+    return false;
+  }
+
   try {
     const parsedUrl = new URL(url);
-    return parsedUrl.hostname === 'docs.google.com' && 
-           parsedUrl.pathname.includes('/spreadsheets/');
+    
+    // Require HTTPS
+    if (parsedUrl.protocol !== 'https:') {
+      console.error('URL must use HTTPS protocol');
+      return false;
+    }
+    
+    // Strict hostname validation - exact match only
+    if (parsedUrl.hostname !== 'docs.google.com') {
+      console.error('Invalid hostname:', parsedUrl.hostname);
+      return false;
+    }
+    
+    // Validate path
+    if (!parsedUrl.pathname.includes('/spreadsheets/')) {
+      console.error('Invalid path - not a spreadsheet URL');
+      return false;
+    }
+    
+    return true;
   } catch {
     return false;
+  }
+}
+
+// Fetch with timeout and size limits
+async function fetchWithLimits(url: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+    });
+    
+    // Check content length if provided
+    const contentLength = response.headers.get('content-length');
+    if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE) {
+      throw new Error('Response too large');
+    }
+    
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -164,7 +215,7 @@ Deno.serve(async (req) => {
 
     console.log('Fetching from:', fetchUrl, 'delimiter:', delimiter === '\t' ? 'TAB' : 'COMMA');
 
-    const response = await fetch(fetchUrl);
+    const response = await fetchWithLimits(fetchUrl);
     
     if (!response.ok) {
       // Log full details server-side for debugging
@@ -183,6 +234,16 @@ Deno.serve(async (req) => {
     }
 
     const text = await response.text();
+    
+    // Check response size after reading
+    if (text.length > MAX_RESPONSE_SIZE) {
+      console.error('Response too large:', text.length);
+      return new Response(
+        JSON.stringify({ error: 'Planilha muito grande. O tamanho máximo é 10MB.' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
     console.log('Data fetched, length:', text.length);
     
     // Auto-detect delimiter if not already determined
