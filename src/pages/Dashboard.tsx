@@ -1,13 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
-import { KPICard } from '@/components/dashboard/KPICard';
+import { KPICard, KPICardSkeleton } from '@/components/dashboard/KPICard';
 import { RankingCard } from '@/components/dashboard/RankingCard';
 import { ProductRankingCard } from '@/components/dashboard/ProductRankingCard';
 import { SalesEvolutionChart } from '@/components/dashboard/SalesEvolutionChart';
 import { ErpPasswordDialog } from '@/components/dashboard/ErpPasswordDialog';
 import { useSheetData, KpiData } from '@/contexts/SheetDataContext';
-import { Loader2, KeyRound } from 'lucide-react';
+import { KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface Filters {
@@ -116,12 +116,6 @@ export default function Dashboard() {
         {/* Filters */}
         <DashboardFilters onFiltersChange={handleFiltersChange} />
         
-        {isLoading && (
-          <div className="flex items-center justify-center gap-3 p-8 bg-primary/5 border border-primary/20 rounded-xl">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            <span className="text-muted-foreground">Carregando dados do ERP...</span>
-          </div>
-        )}
 
         {/* ERP Password Warning */}
         {!erpCredentials?.hasPassword && !isLoading && (
@@ -153,21 +147,30 @@ export default function Dashboard() {
 
         {/* KPI Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {kpis.map((kpi) => (
-            <KPICard
-              key={kpi.id}
-              title={kpi.title}
-              value={kpi.value}
-              rawValue={kpi.rawValue}
-              meta={kpi.meta}
-              targetValue={kpi.targetValue}
-              previousValue={kpi.previousValue}
-              variation={kpi.variation}
-              isPositive={kpi.isPositive}
-              notFound={kpi.notFound}
-              source={kpi.source}
-            />
-          ))}
+          {isLoading ? (
+            <>
+              <KPICardSkeleton />
+              <KPICardSkeleton />
+              <KPICardSkeleton />
+              <KPICardSkeleton />
+            </>
+          ) : (
+            kpis.map((kpi) => (
+              <KPICard
+                key={kpi.id}
+                title={kpi.title}
+                value={kpi.value}
+                rawValue={kpi.rawValue}
+                meta={kpi.meta}
+                targetValue={kpi.targetValue}
+                previousValue={kpi.previousValue}
+                variation={kpi.variation}
+                isPositive={kpi.isPositive}
+                notFound={kpi.notFound}
+                source={kpi.source}
+              />
+            ))
+          )}
         </div>
         
         {/* Chart and Rankings */}

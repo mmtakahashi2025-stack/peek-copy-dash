@@ -1,4 +1,5 @@
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { TrendingUp, TrendingDown, AlertTriangle, ArrowUp, ArrowDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -13,6 +14,24 @@ interface KPICardProps {
   isPositive: boolean;
   notFound?: boolean;
   source?: 'sheet' | 'database' | 'erp';
+  isLoading?: boolean;
+}
+
+export function KPICardSkeleton() {
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between mb-3">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-6 w-16 rounded-full" />
+        </div>
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-32" />
+          <Skeleton className="h-3 w-20" />
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 export function KPICard({ title, value, rawValue, meta, targetValue, previousValue, variation, isPositive, notFound, source = 'sheet' }: KPICardProps) {
