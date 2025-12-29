@@ -5,6 +5,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+interface SalesRequestBody {
+  startDate: string; // DD/MM/YYYY format
+  endDate: string;   // DD/MM/YYYY format
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -24,10 +29,28 @@ serve(async (req) => {
       );
     }
 
-    console.log('Attempting to authenticate with ERP API...');
+    // Parse request body for date filters
+    let startDate: string;
+    let endDate: string;
+    
+    try {
+      const body: SalesRequestBody = await req.json();
+      startDate = body.startDate;
+      endDate = body.endDate;
+    } catch {
+      // Default to current month if no body provided
+      const now = new Date();
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      startDate = `${firstDay.getDate().toString().padStart(2, '0')}/${(firstDay.getMonth() + 1).toString().padStart(2, '0')}/${firstDay.getFullYear()}`;
+      endDate = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
+    }
+
+    console.log(`Fetching sales data from ${startDate} to ${endDate}`);
 
     // Step 1: Authenticate with the ERP API
     const loginUrl = `${erpUrl}/api/auth/login?email=${encodeURIComponent(erpEmail)}&password=${encodeURIComponent(erpPassword)}`;
+    
+    console.log('Authenticating with ERP API...');
     
     const loginResponse = await fetch(loginUrl, {
       method: 'GET',
@@ -47,49 +70,46 @@ serve(async (req) => {
     const loginData = await loginResponse.json();
     console.log('ERP login successful');
 
-    // Extract session cookie or token from response
+    // Extract session cookie and authorization token
     const cookies = loginResponse.headers.get('set-cookie');
-    console.log('Session established');
-
-    // Step 2: Parse request body to get endpoint and parameters
-    let endpoint = '/api/products'; // default endpoint
-    let params = {};
+    const authToken = loginData.token || loginData.access_token || loginData.authorization;
     
-    try {
-      const body = await req.json();
-      endpoint = body.endpoint || endpoint;
-      params = body.params || {};
-    } catch {
-      // Use defaults if no body provided
-    }
+    console.log('Session established, fetching sales data...');
 
-    // Step 3: Fetch data from the ERP API using the session
-    const queryString = new URLSearchParams(params as Record<string, string>).toString();
-    const dataUrl = `${erpUrl}${endpoint}${queryString ? '?' + queryString : ''}`;
+    // Step 2: Fetch sales data using the vendasEmissorExpandido endpoint
+    const salesUrl = `${erpUrl}/api/vendas/vendasEmissorExpandido`;
     
-    console.log('Fetching data from:', endpoint);
-
-    const dataResponse = await fetch(dataUrl, {
-      method: 'GET',
+    const salesResponse = await fetch(salesUrl, {
+      method: 'POST',
       headers: {
+        'Content-Type': 'application/json',
         'Accept': 'application/json',
+        'Authorization': authToken || '',
         'Cookie': cookies || '',
       },
+      body: JSON.stringify({
+        StartDate: startDate,
+        EndDate: endDate,
+      }),
     });
 
-    if (!dataResponse.ok) {
-      console.error('ERP data fetch failed:', dataResponse.status);
+    if (!salesResponse.ok) {
+      console.error('ERP sales fetch failed:', salesResponse.status, await salesResponse.text());
       return new Response(
-        JSON.stringify({ error: 'Failed to fetch data from ERP API' }),
-        { status: dataResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Failed to fetch sales data from ERP API' }),
+        { status: salesResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const data = await dataResponse.json();
-    console.log('Data fetched successfully');
+    const salesData = await salesResponse.json();
+    console.log('Sales data fetched successfully');
 
     return new Response(
-      JSON.stringify({ success: true, data, loginData }),
+      JSON.stringify({ 
+        success: true, 
+        data: salesData,
+        period: { startDate, endDate }
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
