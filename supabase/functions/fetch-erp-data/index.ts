@@ -131,8 +131,8 @@ function formatDate(date: Date): string {
 // ERP API limit - if we hit this, we need finer pagination
 const ERP_API_LIMIT = 5000;
 
-// Sequential mode: one request at a time with delays to reduce server load
-const SEQUENTIAL_DELAY_MS = 1000; // 1 second delay between requests
+// Reduced delay for weekly pagination within a single month (to stay under timeout)
+const WEEKLY_DELAY_MS = 300;
 
 // Helper function for delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -377,145 +377,72 @@ serve(async (req) => {
       );
     }
 
-    // STEP 2: FETCH SALES (with or without pagination)
+    // STEP 2: FETCH SALES
+    // IMPORTANT: This function now handles SINGLE MONTH requests only to avoid Cloudflare timeout
+    // The frontend is responsible for orchestrating multi-month fetches
     let allData: TransformedSaleRow[] = [];
     
-    // Check if we should use pagination (for large date ranges)
-    const shouldPaginate = usePagination && isLargeDateRange(startDate, endDate);
+    // Check if this is a large date range (>1 month) - if so, warn that frontend should split requests
+    const isLargeRange = isLargeDateRange(startDate, endDate);
+    if (isLargeRange && usePagination) {
+      console.log(`[ERP] AVISO: Período grande detectado. Recomendado buscar um mês por vez no frontend.`);
+    }
     
-    if (shouldPaginate) {
-      // Use SEQUENTIAL monthly pagination with delays to reduce server load
-      const periods = generateMonthlyPeriods(startDate, endDate);
-      console.log(`[ERP] Usando paginação mensal SEQUENCIAL: ${periods.length} períodos (delay de ${SEQUENTIAL_DELAY_MS}ms)`);
+    // Single request for the period
+    const result = await fetchSalesForPeriod(
+      erpBaseUrl,
+      authResult.token,
+      authResult.cookies,
+      startDate,
+      endDate
+    );
+    
+    if (!result.success) {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: result.error || 'Erro ao buscar vendas'
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    // If we hit the API limit, use weekly pagination (with small delays to stay under timeout)
+    if (result.data && result.data.length >= ERP_API_LIMIT) {
+      console.log(`[ERP] Limite atingido em ${startDate}-${endDate}, usando paginação semanal...`);
       
-      // Process months one at a time with delay between each
-      for (let monthIdx = 0; monthIdx < periods.length; monthIdx++) {
-        const period = periods[monthIdx];
+      const periodStart = parseDate(startDate);
+      const periodEnd = parseDate(endDate);
+      const weeklyPeriods = generateWeeklyPeriods(periodStart, periodEnd);
+      
+      // Fetch weeks with small delays to avoid overloading server but stay under timeout
+      for (let weekIdx = 0; weekIdx < weeklyPeriods.length; weekIdx++) {
+        const weekPeriod = weeklyPeriods[weekIdx];
         
-        // Add delay between requests (except for the first one)
-        if (monthIdx > 0) {
-          console.log(`[ERP] Aguardando ${SEQUENTIAL_DELAY_MS}ms antes do próximo mês...`);
-          await delay(SEQUENTIAL_DELAY_MS);
+        // Add small delay between weekly requests
+        if (weekIdx > 0) {
+          await delay(WEEKLY_DELAY_MS);
         }
         
-        console.log(`[ERP] Buscando mês ${monthIdx + 1}/${periods.length}: ${period.start} - ${period.end}`);
-        
-        const result = await fetchSalesForPeriod(
+        const weekResult = await fetchSalesForPeriod(
           erpBaseUrl,
           authResult.token!,
           authResult.cookies!,
-          period.start,
-          period.end
+          weekPeriod.start,
+          weekPeriod.end
         );
         
-        if (result.success && result.data) {
-          // Check if we hit the API limit - if so, use weekly pagination (also sequential)
-          if (result.data.length >= ERP_API_LIMIT) {
-            console.log(`[ERP] Limite atingido em ${period.start}-${period.end}, usando paginação semanal sequencial...`);
-            
-            const monthStart = parseDate(period.start);
-            const monthEnd = parseDate(period.end);
-            const weeklyPeriods = generateWeeklyPeriods(monthStart, monthEnd);
-            
-            // Fetch weeks one at a time with delay
-            for (let weekIdx = 0; weekIdx < weeklyPeriods.length; weekIdx++) {
-              const weekPeriod = weeklyPeriods[weekIdx];
-              
-              // Add delay between weekly requests
-              if (weekIdx > 0) {
-                await delay(SEQUENTIAL_DELAY_MS);
-              }
-              
-              const weekResult = await fetchSalesForPeriod(
-                erpBaseUrl,
-                authResult.token!,
-                authResult.cookies!,
-                weekPeriod.start,
-                weekPeriod.end
-              );
-              
-              if (weekResult.success && weekResult.data) {
-                allData.push(...weekResult.data);
-                if (weekResult.data.length >= ERP_API_LIMIT) {
-                  console.warn(`[ERP] AVISO: Limite atingido na semana ${weekPeriod.start}-${weekPeriod.end}. Dados podem estar incompletos.`);
-                }
-              }
-            }
-            
-            console.log(`[ERP] Mês ${period.start}-${period.end} com paginação semanal: ${allData.length} registros acumulados`);
-          } else {
-            allData.push(...result.data);
-            console.log(`[ERP] Mês ${period.start}-${period.end}: ${result.data.length} registros (total: ${allData.length})`);
+        if (weekResult.success && weekResult.data) {
+          allData.push(...weekResult.data);
+          if (weekResult.data.length >= ERP_API_LIMIT) {
+            console.warn(`[ERP] AVISO: Limite atingido na semana ${weekPeriod.start}-${weekPeriod.end}. Dados podem estar incompletos.`);
           }
-        } else {
-          console.error(`[ERP] Erro no período ${period.start}-${period.end}:`, result.error);
         }
       }
       
-      console.log(`[ERP] Total após paginação: ${allData.length} registros`);
-      
-      // Log unique sales count for debugging
-      const uniqueSales = new Set(allData.map(row => row['Venda #']));
-      console.log(`[ERP] Vendas únicas: ${uniqueSales.size}`);
+      console.log(`[ERP] Período ${startDate}-${endDate} com paginação semanal: ${allData.length} registros`);
     } else {
-      // Single request for short periods - but still check for API limit
-      const result = await fetchSalesForPeriod(
-        erpBaseUrl,
-        authResult.token,
-        authResult.cookies,
-        startDate,
-        endDate
-      );
-      
-      if (!result.success) {
-        return new Response(
-          JSON.stringify({ 
-            success: false, 
-            error: result.error || 'Erro ao buscar vendas'
-          }),
-          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      
-      // If we hit the limit even for short periods, use weekly pagination (sequential)
-      if (result.data && result.data.length >= ERP_API_LIMIT) {
-        console.log(`[ERP] Limite atingido em período curto ${startDate}-${endDate}, usando paginação semanal sequencial...`);
-        
-        const periodStart = parseDate(startDate);
-        const periodEnd = parseDate(endDate);
-        const weeklyPeriods = generateWeeklyPeriods(periodStart, periodEnd);
-        
-        // Fetch weeks one at a time with delay
-        const weekResults: TransformedSaleRow[] = [];
-        for (let weekIdx = 0; weekIdx < weeklyPeriods.length; weekIdx++) {
-          const weekPeriod = weeklyPeriods[weekIdx];
-          
-          // Add delay between weekly requests
-          if (weekIdx > 0) {
-            await delay(SEQUENTIAL_DELAY_MS);
-          }
-          
-          const weekResult = await fetchSalesForPeriod(
-            erpBaseUrl,
-            authResult.token!,
-            authResult.cookies!,
-            weekPeriod.start,
-            weekPeriod.end
-          );
-          
-          if (weekResult.success && weekResult.data) {
-            weekResults.push(...weekResult.data);
-            if (weekResult.data.length >= ERP_API_LIMIT) {
-              console.warn(`[ERP] AVISO: Limite atingido na semana ${weekPeriod.start}-${weekPeriod.end}. Dados podem estar incompletos.`);
-            }
-          }
-        }
-        
-        console.log(`[ERP] Período curto ${startDate}-${endDate} com paginação semanal: ${weekResults.length} registros`);
-        allData = weekResults;
-      } else {
-        allData = result.data || [];
-      }
+      allData = result.data || [];
     }
     
     // Log unique sales count and total revenue for verification
@@ -531,7 +458,6 @@ serve(async (req) => {
         count: allData.length,
         period: { startDate, endDate },
         user: authResult.user?.name,
-        paginated: shouldPaginate,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
