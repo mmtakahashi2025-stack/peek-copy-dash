@@ -459,7 +459,7 @@ serve(async (req) => {
       const uniqueSales = new Set(allData.map(row => row['Venda #']));
       console.log(`[ERP] Vendas únicas: ${uniqueSales.size}`);
     } else {
-      // Single request for short periods
+      // Single request for short periods - but still check for API limit
       const result = await fetchSalesForPeriod(
         erpBaseUrl,
         authResult.token,
@@ -478,10 +478,52 @@ serve(async (req) => {
         );
       }
       
-      allData = result.data || [];
+      // If we hit the limit even for short periods, use weekly pagination
+      if (result.data && result.data.length >= ERP_API_LIMIT) {
+        console.log(`[ERP] Limite atingido em período curto ${startDate}-${endDate}, usando paginação semanal...`);
+        
+        const periodStart = parseDate(startDate);
+        const periodEnd = parseDate(endDate);
+        const weeklyPeriods = generateWeeklyPeriods(periodStart, periodEnd);
+        
+        const weekResults: TransformedSaleRow[] = [];
+        for (let i = 0; i < weeklyPeriods.length; i += WEEK_CONCURRENCY) {
+          const batch = weeklyPeriods.slice(i, i + WEEK_CONCURRENCY);
+          const batchResults = await Promise.all(
+            batch.map(weekPeriod =>
+              fetchSalesForPeriod(
+                erpBaseUrl,
+                authResult.token!,
+                authResult.cookies!,
+                weekPeriod.start,
+                weekPeriod.end
+              )
+            )
+          );
+          
+          for (let j = 0; j < batchResults.length; j++) {
+            const weekResult = batchResults[j];
+            if (weekResult.success && weekResult.data) {
+              weekResults.push(...weekResult.data);
+              if (weekResult.data.length >= ERP_API_LIMIT) {
+                console.warn(`[ERP] AVISO: Limite atingido na semana ${batch[j].start}-${batch[j].end}. Dados podem estar incompletos.`);
+              }
+            }
+          }
+        }
+        
+        console.log(`[ERP] Período curto ${startDate}-${endDate} com paginação semanal: ${weekResults.length} registros`);
+        allData = weekResults;
+      } else {
+        allData = result.data || [];
+      }
     }
     
+    // Log unique sales count and total revenue for verification
+    const uniqueSales = new Set(allData.map(row => row['Venda #']));
+    const totalRevenue = allData.reduce((sum, row) => sum + (row.Líquido || 0), 0);
     console.log(`[ERP] Sucesso! ${allData.length} registros totais`);
+    console.log(`[ERP] Vendas únicas: ${uniqueSales.size} | Faturamento: R$ ${totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
 
     return new Response(
       JSON.stringify({ 
