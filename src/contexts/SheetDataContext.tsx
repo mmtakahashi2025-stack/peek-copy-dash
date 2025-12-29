@@ -107,6 +107,12 @@ export interface LoginTestResult {
   error?: string;
 }
 
+export interface UserErpCredentials {
+  email: string;
+  password: string | null;
+  hasPassword: boolean;
+}
+
 interface SheetDataContextType {
   rawData: RawSaleRow[];
   isLoading: boolean;
@@ -115,6 +121,7 @@ interface SheetDataContextType {
   diagnostic: DiagnosticInfo;
   filiais: FilialData[];
   colaboradores: string[];
+  erpCredentials: UserErpCredentials | null;
   getKpis: (filialId: string, dateFilter?: DateFilter, leadsRecebidos?: number) => KpiData[];
   getColaboradores: (filialId: string, colaboradorId?: string) => ColaboradorData[];
   getEvolucao: () => EvolucaoData[];
@@ -124,6 +131,7 @@ interface SheetDataContextType {
   testErpLogin: () => Promise<LoginTestResult>;
   fetchExcellencePercentage: (dateFilter?: DateFilter) => Promise<number | null>;
   fetchLeadsTotal: (dateFilter?: DateFilter) => Promise<number | null>;
+  refreshErpCredentials: () => Promise<void>;
 }
 
 const SheetDataContext = createContext<SheetDataContextType | undefined>(undefined);
@@ -169,6 +177,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [currentPeriod, setCurrentPeriod] = useState<{ dateFrom: Date; dateTo: Date } | null>(null);
+  const [erpCredentials, setErpCredentials] = useState<UserErpCredentials | null>(null);
   const [diagnostic, setDiagnostic] = useState<DiagnosticInfo>({
     lastAttempt: null,
     lastSuccess: null,
@@ -177,6 +186,38 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     period: null,
     status: 'idle',
   });
+
+  // Fetch ERP credentials from profile
+  const refreshErpCredentials = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setErpCredentials(null);
+      return;
+    }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('email, erp_password')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    setErpCredentials({
+      email: user.email || '',
+      password: profile?.erp_password || null,
+      hasPassword: !!profile?.erp_password,
+    });
+  }, []);
+
+  // Load credentials on mount and auth changes
+  useEffect(() => {
+    refreshErpCredentials();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      refreshErpCredentials();
+    });
+
+    return () => subscription.unsubscribe();
+  }, [refreshErpCredentials]);
 
   // Fetch KPI targets from database
   useEffect(() => {
@@ -345,11 +386,20 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     }));
 
     try {
+      // Build request body with user credentials if available
+      const requestBody: Record<string, string> = {
+        startDate: formatDateForErp(startDate),
+        endDate: formatDateForErp(endDate),
+      };
+
+      // Add user credentials if available
+      if (erpCredentials?.email && erpCredentials?.password) {
+        requestBody.email = erpCredentials.email;
+        requestBody.password = erpCredentials.password;
+      }
+
       const { data: response, error: funcError } = await supabase.functions.invoke('fetch-erp-data', {
-        body: { 
-          startDate: formatDateForErp(startDate),
-          endDate: formatDateForErp(endDate)
-        }
+        body: requestBody
       });
 
       if (funcError) {
@@ -358,6 +408,12 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
 
       // Check for success flag in response (new format)
       if (response?.success === false) {
+        if (response.needsCredentials) {
+          throw new Error('Configure sua senha do ERP para carregar os dados.');
+        }
+        if (response.invalidCredentials) {
+          throw new Error('Credenciais inválidas. Verifique sua senha do ERP.');
+        }
         throw new Error(response.error || 'Erro desconhecido do ERP');
       }
 
@@ -400,7 +456,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [broadcastUpdate]);
+  }, [broadcastUpdate, erpCredentials]);
 
   const refreshData = useCallback(async () => {
     if (currentPeriod) {
@@ -705,6 +761,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       diagnostic,
       filiais,
       colaboradores,
+      erpCredentials,
       getKpis,
       getColaboradores,
       getEvolucao,
@@ -714,6 +771,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       testErpLogin,
       fetchExcellencePercentage,
       fetchLeadsTotal,
+      refreshErpCredentials,
     }}>
       {children}
     </SheetDataContext.Provider>
