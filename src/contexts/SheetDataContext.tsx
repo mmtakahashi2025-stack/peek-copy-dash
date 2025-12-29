@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useErpCache } from '@/hooks/useErpCache';
@@ -450,10 +450,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       setRawData(data);
       setIsConnected(true);
       setCurrentPeriod({ dateFrom: startDate, dateTo: endDate });
-      
-      // Save to cache
-      setCachedData(startDate, endDate, data);
-      
+
       setDiagnostic(prev => ({
         ...prev,
         lastSuccess: new Date(),
@@ -461,10 +458,26 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         recordsLoaded: data.length,
         status: 'success',
       }));
-      
-      // Broadcast to other users
-      await broadcastUpdate(data);
-      
+
+      // Save + broadcast in the background to avoid blocking the UI on huge payloads
+      const MAX_ROWS_BACKGROUND_OPS = 20000;
+
+      if (data.length <= MAX_ROWS_BACKGROUND_OPS) {
+        setTimeout(() => {
+          try {
+            setCachedData(startDate, endDate, data);
+          } catch (e) {
+            console.error('[Cache] Failed to persist cache', e);
+          }
+        }, 0);
+
+        setTimeout(() => {
+          void broadcastUpdate(data);
+        }, 0);
+      } else {
+        console.info(`[Perf] Skipping cache/broadcast for large payload: ${data.length} rows`);
+      }
+
       toast.success(`${data.length} registros carregados do ERP`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
@@ -503,15 +516,19 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Get unique filiais
-  const filiais: FilialData[] = [
-    { id: 'todas', nome: 'Todas as Filiais' },
-    ...Array.from(new Set(rawData.map(r => r.Filial)))
-      .filter(Boolean)
-      .map(f => ({ id: normalizeFilialId(f), nome: f }))
-  ];
+  const filiais: FilialData[] = useMemo(() => {
+    return [
+      { id: 'todas', nome: 'Todas as Filiais' },
+      ...Array.from(new Set(rawData.map(r => r.Filial)))
+        .filter(Boolean)
+        .map(f => ({ id: normalizeFilialId(f), nome: f }))
+    ];
+  }, [rawData]);
 
   // Get unique colaboradores (Emissor)
-  const colaboradores = Array.from(new Set(rawData.map(r => r.Emissor))).filter(Boolean);
+  const colaboradores = useMemo(() => {
+    return Array.from(new Set(rawData.map(r => r.Emissor))).filter(Boolean);
+  }, [rawData]);
 
   // Calculate KPIs
   const getKpis = useCallback((filialId: string, dateFilter?: DateFilter, leadsRecebidos?: number): KpiData[] => {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
 import { KPICard, KPICardSkeleton } from '@/components/dashboard/KPICard';
@@ -115,8 +115,14 @@ export default function Dashboard() {
     }
   }, [filters.dateFrom, filters.dateTo]);
 
-  const colaboradores = getColaboradores(filters.filial, filters.colaborador);
-  const produtos = getProdutos(filters.filial);
+  const colaboradores = useMemo(
+    () => getColaboradores(filters.filial, filters.colaborador),
+    [getColaboradores, filters.filial, filters.colaborador]
+  );
+  const produtos = useMemo(
+    () => getProdutos(filters.filial),
+    [getProdutos, filters.filial]
+  );
 
   const hasData = rawData.length > 0;
 
