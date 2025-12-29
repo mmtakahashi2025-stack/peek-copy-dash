@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
-// Types for raw sheet data
+// Types for raw sale data (from ERP or sheet)
 export interface RawSaleRow {
   Filial: string;
   Emissor: string;
@@ -40,7 +40,7 @@ export interface KpiData {
   variation: number;
   isPositive: boolean;
   notFound?: boolean;
-  source?: 'sheet' | 'database'; // Indicates the data source
+  source?: 'erp' | 'database';
 }
 
 export interface ColaboradorData {
@@ -81,14 +81,14 @@ interface SheetDataContextType {
   rawData: RawSaleRow[];
   isLoading: boolean;
   error: string | null;
-  sheetUrl: string | null;
+  isConnected: boolean;
   filiais: FilialData[];
   colaboradores: string[];
   getKpis: (filialId: string, dateFilter?: DateFilter, leadsRecebidos?: number) => KpiData[];
   getColaboradores: (filialId: string, colaboradorId?: string) => ColaboradorData[];
   getEvolucao: () => EvolucaoData[];
   getProdutos: (filialId: string) => ProdutoData[];
-  loadSheet: (url: string) => Promise<void>;
+  loadErpData: (dateFrom?: Date, dateTo?: Date) => Promise<void>;
   refreshData: () => Promise<void>;
   fetchExcellencePercentage: (dateFilter?: DateFilter) => Promise<number | null>;
   fetchLeadsTotal: (dateFilter?: DateFilter) => Promise<number | null>;
@@ -96,8 +96,8 @@ interface SheetDataContextType {
 
 const SheetDataContext = createContext<SheetDataContextType | undefined>(undefined);
 
-const SHEET_URL_KEY = 'dashboard_sheet_url';
-const SHEET_DATA_KEY = 'dashboard_sheet_data';
+const ERP_DATA_KEY = 'dashboard_erp_data';
+const ERP_PERIOD_KEY = 'dashboard_erp_period';
 
 const colors = ['bg-primary', 'bg-success', 'bg-warning', 'bg-chart-4', 'bg-chart-5', 'bg-primary/80', 'bg-success/80', 'bg-warning/80'];
 
@@ -122,13 +122,21 @@ function normalizeFilialId(filial: string): string {
   return filial.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
 }
 
+function formatDateForErp(date: Date): string {
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
 export function SheetDataProvider({ children }: { children: ReactNode }) {
   const [rawData, setRawData] = useState<RawSaleRow[]>([]);
   const [kpiTargets, setKpiTargets] = useState<KpiTarget[]>([]);
   const [excellencePercentage, setExcellencePercentage] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sheetUrl, setSheetUrl] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [currentPeriod, setCurrentPeriod] = useState<{ dateFrom: Date; dateTo: Date } | null>(null);
 
   // Fetch KPI targets from database
   useEffect(() => {
@@ -158,7 +166,6 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       ? dateFilter.dateTo.toISOString().split('T')[0]
       : new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
 
-    // Get evaluations for the date range
     const { data: evaluations, error: evalError } = await supabase
       .from('excellence_evaluations')
       .select('id')
@@ -171,7 +178,6 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
 
     const evalIds = evaluations.map(e => e.id);
 
-    // Get scores for these evaluations
     const { data: scores, error: scoresError } = await supabase
       .from('excellence_scores')
       .select('score')
@@ -181,7 +187,6 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       return null;
     }
 
-    // Calculate percentage: valid scores (not -1), count positives (1)
     const validScores = scores.filter(s => s.score !== null && s.score !== -1);
     const positiveScores = validScores.filter(s => s.score === 1).length;
     const percentage = validScores.length > 0 ? (positiveScores / validScores.length) * 100 : null;
@@ -213,7 +218,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     return total;
   }, []);
 
-  // Fetch excellence evaluations from database to calculate Padrão Exc. % (for initial load)
+  // Fetch excellence evaluations from database
   useEffect(() => {
     const fetchExcellenceData = async () => {
       const percentage = await fetchExcellencePercentage();
@@ -223,73 +228,49 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     fetchExcellenceData();
   }, [fetchExcellencePercentage]);
 
-  // Load saved data on mount - using sessionStorage for security (clears on tab close)
+  // Load saved data on mount
   useEffect(() => {
-    const savedUrl = sessionStorage.getItem(SHEET_URL_KEY);
-    const savedData = sessionStorage.getItem(SHEET_DATA_KEY);
-    
-    if (savedUrl) {
-      setSheetUrl(savedUrl);
-    }
+    const savedData = sessionStorage.getItem(ERP_DATA_KEY);
+    const savedPeriod = sessionStorage.getItem(ERP_PERIOD_KEY);
     
     if (savedData) {
       try {
         setRawData(JSON.parse(savedData));
+        setIsConnected(true);
       } catch {
-        console.error('Failed to parse saved data');
+        console.error('Failed to parse saved ERP data');
+      }
+    }
+    
+    if (savedPeriod) {
+      try {
+        const period = JSON.parse(savedPeriod);
+        setCurrentPeriod({
+          dateFrom: new Date(period.dateFrom),
+          dateTo: new Date(period.dateTo),
+        });
+      } catch {
+        console.error('Failed to parse saved period');
       }
     }
   }, []);
 
-  // Validate broadcast data structure to prevent data corruption attacks
-  const isValidBroadcastData = (data: unknown): data is RawSaleRow[] => {
-    if (!Array.isArray(data) || data.length === 0 || data.length > 10000) {
-      return false;
-    }
-    // Validate all rows have expected structure
-    return data.every(row => 
-      typeof row === 'object' && 
-      row !== null &&
-      'Filial' in row &&
-      'Emissor' in row
-    );
-  };
-
-  // Validate URL is a Google Sheets URL
-  const isValidSheetUrl = (url: string): boolean => {
-    try {
-      const parsedUrl = new URL(url);
-      return parsedUrl.hostname === 'docs.google.com' && 
-             parsedUrl.pathname.includes('/spreadsheets/');
-    } catch {
-      return false;
-    }
-  };
-
   // Subscribe to realtime updates from other users
   useEffect(() => {
     const channel = supabase
-      .channel('sheet-data-sync')
-      .on('broadcast', { event: 'sheet-updated' }, (payload) => {
-        console.log('Received sheet update from another user');
-        const { data, url } = payload.payload as { data: RawSaleRow[]; url: string };
+      .channel('erp-data-sync')
+      .on('broadcast', { event: 'erp-updated' }, (payload) => {
+        console.log('Received ERP update from another user');
+        const { data } = payload.payload as { data: RawSaleRow[] };
         
-        // Validate data structure to prevent data corruption attacks
-        if (!isValidBroadcastData(data)) {
+        if (!Array.isArray(data) || data.length === 0 || data.length > 50000) {
           console.error('Invalid broadcast data received - rejecting');
-          return;
-        }
-
-        // Validate URL to prevent malicious URLs
-        if (!isValidSheetUrl(url)) {
-          console.error('Invalid sheet URL in broadcast - rejecting');
           return;
         }
         
         setRawData(data);
-        setSheetUrl(url);
-        sessionStorage.setItem(SHEET_URL_KEY, url);
-        sessionStorage.setItem(SHEET_DATA_KEY, JSON.stringify(data));
+        setIsConnected(true);
+        sessionStorage.setItem(ERP_DATA_KEY, JSON.stringify(data));
         toast.info('Dados atualizados por outro usuário');
       })
       .subscribe();
@@ -299,53 +280,33 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const broadcastUpdate = useCallback(async (data: RawSaleRow[], url: string) => {
-    const channel = supabase.channel('sheet-data-sync');
+  const broadcastUpdate = useCallback(async (data: RawSaleRow[]) => {
+    const channel = supabase.channel('erp-data-sync');
     await channel.send({
       type: 'broadcast',
-      event: 'sheet-updated',
-      payload: { data, url },
+      event: 'erp-updated',
+      payload: { data },
     });
   }, []);
 
-  const loadSheet = useCallback(async (url: string, broadcast = true) => {
+  const loadErpData = useCallback(async (dateFrom?: Date, dateTo?: Date, broadcast = true) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      // Validate URL before making the request
-      if (!isValidSheetUrl(url)) {
-        throw new Error('URL inválida. Use uma URL do Google Sheets.');
-      }
+      const now = new Date();
+      const startDate = dateFrom || new Date(now.getFullYear(), now.getMonth(), 1);
+      const endDate = dateTo || now;
 
-      const { data: response, error: funcError } = await supabase.functions.invoke('fetch-sheets', {
-        body: { sheetUrl: url }
+      const { data: response, error: funcError } = await supabase.functions.invoke('fetch-erp-data', {
+        body: { 
+          startDate: formatDateForErp(startDate),
+          endDate: formatDateForErp(endDate)
+        }
       });
 
       if (funcError) {
-        const ctx = (funcError as any)?.context;
-        const status = ctx?.status as number | undefined;
-        const body = ctx?.body as unknown;
-
-        let serverError: string | undefined;
-        if (body) {
-          try {
-            const parsed = typeof body === 'string' ? JSON.parse(body) : body;
-            serverError = (parsed as any)?.error;
-          } catch {
-            // ignore
-          }
-        }
-
-        if (status === 401) {
-          throw new Error('Sessão expirada. Faça login novamente para carregar a planilha.');
-        }
-
-        if (serverError) {
-          throw new Error(serverError);
-        }
-
-        throw new Error(funcError.message || 'Erro ao buscar dados');
+        throw new Error(funcError.message || 'Erro ao buscar dados do ERP');
       }
 
       if (response?.error) {
@@ -354,18 +315,19 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
 
       const data = response.data as RawSaleRow[];
       setRawData(data);
-      setSheetUrl(url);
+      setIsConnected(true);
+      setCurrentPeriod({ dateFrom: startDate, dateTo: endDate });
       
-      // Save to sessionStorage (more secure - clears on tab close)
-      sessionStorage.setItem(SHEET_URL_KEY, url);
-      sessionStorage.setItem(SHEET_DATA_KEY, JSON.stringify(data));
+      // Save to sessionStorage
+      sessionStorage.setItem(ERP_DATA_KEY, JSON.stringify(data));
+      sessionStorage.setItem(ERP_PERIOD_KEY, JSON.stringify({ dateFrom: startDate, dateTo: endDate }));
       
       // Broadcast to other users
       if (broadcast) {
-        await broadcastUpdate(data, url);
+        await broadcastUpdate(data);
       }
       
-      toast.success(`${data.length} registros carregados da planilha`);
+      toast.success(`${data.length} registros carregados do ERP`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
       setError(errorMessage);
@@ -376,10 +338,12 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   }, [broadcastUpdate]);
 
   const refreshData = useCallback(async () => {
-    if (sheetUrl) {
-      await loadSheet(sheetUrl, true);
+    if (currentPeriod) {
+      await loadErpData(currentPeriod.dateFrom, currentPeriod.dateTo, true);
+    } else {
+      await loadErpData();
     }
-  }, [sheetUrl, loadSheet]);
+  }, [currentPeriod, loadErpData]);
 
   // Get unique filiais
   const filiais: FilialData[] = [
@@ -392,38 +356,29 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   // Get unique colaboradores (Emissor)
   const colaboradores = Array.from(new Set(rawData.map(r => r.Emissor))).filter(Boolean);
 
-  // Calculate KPIs - maintaining the original 8 KPIs
+  // Calculate KPIs
   const getKpis = useCallback((filialId: string, dateFilter?: DateFilter, leadsRecebidos?: number): KpiData[] => {
-    // First filter by filial
     let filteredData = filialId === 'todas' 
       ? rawData 
       : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
 
-    // Then filter by date if provided
-    // Note: The 'Data Venda' field might be a number (day of month) or a date string
-    // We'll need to handle this appropriately based on the actual data format
+    // Filter by date if provided
     if (dateFilter?.dateFrom || dateFilter?.dateTo) {
       filteredData = filteredData.filter(r => {
         const dataVenda = r['Data Venda'];
-        if (!dataVenda) return true; // Include if no date
+        if (!dataVenda) return true;
         
-        // Try to parse the date - could be number (day) or string
         let rowDate: Date | null = null;
         
-        if (typeof dataVenda === 'number') {
-          // Assume it's a day of month - use current month as context
-          // This is a simplified approach; real implementation might need more context
+        if (typeof dataVenda === 'string') {
+          // Parse ISO date format (2025-01-01 09:32:33)
+          rowDate = new Date(dataVenda);
+        } else if (typeof dataVenda === 'number') {
           const now = new Date();
           rowDate = new Date(now.getFullYear(), now.getMonth(), dataVenda);
-        } else if (typeof dataVenda === 'string') {
-          // Try to parse string date (DD/MM/YYYY format common in Brazil)
-          const parts = dataVenda.split('/');
-          if (parts.length === 3) {
-            rowDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-          }
         }
         
-        if (!rowDate || isNaN(rowDate.getTime())) return true; // Include if we can't parse
+        if (!rowDate || isNaN(rowDate.getTime())) return true;
         
         const fromDate = dateFilter.dateFrom;
         const toDate = dateFilter.dateTo;
@@ -435,13 +390,11 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    // Helper to get target for a KPI type
     const getTarget = (kpiType: string): number | undefined => {
       const target = kpiTargets.find(t => t.kpi_type === kpiType);
       return target?.target_value;
     };
 
-    // Helper to format target value for display
     const formatTarget = (kpiType: string, value: number | undefined): string | undefined => {
       if (value === undefined) return undefined;
       if (kpiType === 'faturamento' || kpiType === 'ticket-medio') {
@@ -454,7 +407,6 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     };
 
     if (filteredData.length === 0) {
-      // Return all 8 KPIs - Padrão Exc. uses database data, others with notFound state
       return [
         { 
           id: 'padrao-exc', 
@@ -469,16 +421,16 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
           source: 'database' as const,
         },
         { id: 'leads', title: 'Leads', value: '--', meta: formatTarget('leads', getTarget('leads')), targetValue: getTarget('leads'), variation: 0, isPositive: true, notFound: true, source: 'database' as const },
-        { id: 'vendas', title: 'Vendas', value: '--', meta: formatTarget('vendas', getTarget('vendas')), targetValue: getTarget('vendas'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
-        { id: 'conversao', title: 'Conversão', value: '--', meta: formatTarget('conversao', getTarget('conversao')), targetValue: getTarget('conversao'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
-        { id: 'faturamento', title: 'Faturamento', value: '--', meta: formatTarget('faturamento', getTarget('faturamento')), targetValue: getTarget('faturamento'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
-        { id: 'ticket-medio', title: 'Ticket Médio', value: '--', meta: formatTarget('ticket-medio', getTarget('ticket-medio')), targetValue: getTarget('ticket-medio'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
-        { id: 'pa', title: 'P.A', value: '--', meta: formatTarget('pa', getTarget('pa')), targetValue: getTarget('pa'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
-        { id: 'lucro', title: 'Lucro %', value: '--', meta: formatTarget('lucro', getTarget('lucro')), targetValue: getTarget('lucro'), variation: 0, isPositive: true, notFound: true, source: 'sheet' as const },
+        { id: 'vendas', title: 'Vendas', value: '--', meta: formatTarget('vendas', getTarget('vendas')), targetValue: getTarget('vendas'), variation: 0, isPositive: true, notFound: true, source: 'erp' as const },
+        { id: 'conversao', title: 'Conversão', value: '--', meta: formatTarget('conversao', getTarget('conversao')), targetValue: getTarget('conversao'), variation: 0, isPositive: true, notFound: true, source: 'erp' as const },
+        { id: 'faturamento', title: 'Faturamento', value: '--', meta: formatTarget('faturamento', getTarget('faturamento')), targetValue: getTarget('faturamento'), variation: 0, isPositive: true, notFound: true, source: 'erp' as const },
+        { id: 'ticket-medio', title: 'Ticket Médio', value: '--', meta: formatTarget('ticket-medio', getTarget('ticket-medio')), targetValue: getTarget('ticket-medio'), variation: 0, isPositive: true, notFound: true, source: 'erp' as const },
+        { id: 'pa', title: 'P.A', value: '--', meta: formatTarget('pa', getTarget('pa')), targetValue: getTarget('pa'), variation: 0, isPositive: true, notFound: true, source: 'erp' as const },
+        { id: 'lucro', title: 'Lucro %', value: '--', meta: formatTarget('lucro', getTarget('lucro')), targetValue: getTarget('lucro'), variation: 0, isPositive: true, notFound: true, source: 'erp' as const },
       ];
     }
 
-    // Aggregate data from spreadsheet
+    // Aggregate data
     const vendaIds = new Set(filteredData.map(r => r['Venda #']));
     const totalVendas = vendaIds.size;
     const totalFaturamento = filteredData.reduce((sum, r) => sum + (r.Líquido || 0), 0);
@@ -488,7 +440,6 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     const lucroPercent = totalFaturamento > 0 ? (totalLucro / totalFaturamento) * 100 : 0;
     const pa = totalVendas > 0 ? totalQuantidade / totalVendas : 0;
 
-    // Return the 8 original KPIs - mark as notFound if data is not available in spreadsheet
     return [
       {
         id: 'padrao-exc',
@@ -524,7 +475,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         variation: 0,
         isPositive: true,
         notFound: false,
-        source: 'sheet' as const,
+        source: 'erp' as const,
       },
       {
         id: 'conversao',
@@ -553,7 +504,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         variation: 0,
         isPositive: true,
         notFound: false,
-        source: 'sheet' as const,
+        source: 'erp' as const,
       },
       {
         id: 'ticket-medio',
@@ -566,7 +517,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         variation: 0,
         isPositive: true,
         notFound: false,
-        source: 'sheet' as const,
+        source: 'erp' as const,
       },
       {
         id: 'pa',
@@ -579,7 +530,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         variation: 0,
         isPositive: true,
         notFound: false,
-        source: 'sheet' as const,
+        source: 'erp' as const,
       },
       {
         id: 'lucro',
@@ -592,7 +543,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         variation: 0,
         isPositive: lucroPercent > 0,
         notFound: false,
-        source: 'sheet' as const,
+        source: 'erp' as const,
       },
     ];
   }, [rawData, kpiTargets, excellencePercentage]);
@@ -603,7 +554,6 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       ? rawData 
       : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
 
-    // Group by emissor
     const byEmissor: Record<string, { vendas: Set<number>; faturamento: number; filial: string }> = {};
     
     filteredData.forEach(row => {
@@ -639,10 +589,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
 
   // Calculate monthly evolution
   const getEvolucao = useCallback((): EvolucaoData[] => {
-    // For now, return empty as the date field needs proper parsing
-    // The data shows "Data Venda" as numbers (likely day of month)
     return [];
-  }, [rawData]);
+  }, []);
 
   // Calculate product ranking
   const getProdutos = useCallback((filialId: string): ProdutoData[] => {
@@ -650,7 +598,6 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       ? rawData 
       : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
 
-    // Group by Item and sum Quantidade
     const byProduto: Record<string, number> = {};
     
     filteredData.forEach(row => {
@@ -675,14 +622,14 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       rawData,
       isLoading,
       error,
-      sheetUrl,
+      isConnected,
       filiais,
       colaboradores,
       getKpis,
       getColaboradores,
       getEvolucao,
       getProdutos,
-      loadSheet,
+      loadErpData,
       refreshData,
       fetchExcellencePercentage,
       fetchLeadsTotal,

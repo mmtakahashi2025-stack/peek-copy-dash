@@ -12,7 +12,7 @@ interface KPICardProps {
   variation: number;
   isPositive: boolean;
   notFound?: boolean;
-  source?: 'sheet' | 'database';
+  source?: 'sheet' | 'database' | 'erp';
 }
 
 export function KPICard({ title, value, rawValue, meta, targetValue, previousValue, variation, isPositive, notFound, source = 'sheet' }: KPICardProps) {
@@ -24,6 +24,8 @@ export function KPICard({ title, value, rawValue, meta, targetValue, previousVal
   // Message based on data source
   const notFoundMessage = source === 'database' 
     ? 'Dado não encontrado no banco de dados' 
+    : source === 'erp'
+    ? 'Dado não encontrado no ERP'
     : 'Dado não encontrado na planilha';
 
   if (notFound) {

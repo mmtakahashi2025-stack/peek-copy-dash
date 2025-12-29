@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -8,33 +8,19 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Settings, Loader2, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Settings, Loader2, CheckCircle2, AlertCircle, RefreshCw, Database } from 'lucide-react';
 import { useSheetData } from '@/contexts/SheetDataContext';
 
 export function SheetConfigDialog() {
   const [open, setOpen] = useState(false);
-  const [urlInput, setUrlInput] = useState('');
-  const { rawData, isLoading, error, sheetUrl, loadSheet, refreshData } = useSheetData();
+  const { rawData, isLoading, error, isConnected, loadErpData, refreshData } = useSheetData();
 
-  useEffect(() => {
-    if (sheetUrl) {
-      setUrlInput(sheetUrl);
-    }
-  }, [sheetUrl]);
-
-  const handleTest = async () => {
-    if (!urlInput.trim()) {
-      return;
-    }
-    await loadSheet(urlInput);
+  const handleRefresh = async () => {
+    await refreshData();
   };
 
-  const handleSave = () => {
-    if (rawData.length > 0) {
-      setOpen(false);
-    }
+  const handleLoadData = async () => {
+    await loadErpData();
   };
 
   const hasData = rawData.length > 0;
@@ -45,7 +31,7 @@ export function SheetConfigDialog() {
         <Button 
           variant="ghost" 
           size="sm" 
-          onClick={refreshData}
+          onClick={handleRefresh}
           disabled={isLoading}
           className="gap-2"
         >
@@ -57,39 +43,44 @@ export function SheetConfigDialog() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger asChild>
           <Button variant="outline" size="sm" className="gap-2">
-            <Settings className="h-4 w-4" />
+            <Database className="h-4 w-4" />
             <span className="hidden sm:inline">
-              {hasData ? 'Planilha' : 'Configurar Planilha'}
+              {isConnected ? 'ERP Conectado' : 'Conectar ERP'}
             </span>
           </Button>
         </DialogTrigger>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Conectar Google Sheets</DialogTitle>
+            <DialogTitle>Conexão com ERP</DialogTitle>
             <DialogDescription>
-              Configure a URL da sua planilha do Google Sheets para carregar os dados.
+              Os dados de vendas são carregados automaticamente do sistema ERP.
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="sheetUrl">URL da Planilha</Label>
-              <Input
-                id="sheetUrl"
-                placeholder="https://docs.google.com/spreadsheets/d/..."
-                value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Use a URL de publicação: Arquivo → Compartilhar → Publicar na web → TSV/CSV
-              </p>
+            <div className="p-4 bg-muted/50 rounded-lg space-y-2">
+              <div className="flex items-center gap-2">
+                <Database className="h-5 w-5 text-primary" />
+                <span className="font-medium">Status da Conexão</span>
+              </div>
+              {isConnected ? (
+                <div className="flex items-center gap-2 text-green-600">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span className="text-sm">Conectado ao ERP</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-amber-600">
+                  <AlertCircle className="h-4 w-4" />
+                  <span className="text-sm">Não conectado</span>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-2">
               <Button 
                 variant="outline" 
-                onClick={handleTest}
-                disabled={isLoading || !urlInput.trim()}
+                onClick={handleLoadData}
+                disabled={isLoading}
                 className="flex-1"
               >
                 {isLoading ? (
@@ -102,8 +93,7 @@ export function SheetConfigDialog() {
                 )}
               </Button>
               <Button 
-                onClick={handleSave}
-                disabled={rawData.length === 0}
+                onClick={() => setOpen(false)}
                 className="flex-1"
               >
                 Fechar
@@ -121,7 +111,7 @@ export function SheetConfigDialog() {
               <div className="flex items-center gap-2 p-3 bg-green-500/10 text-green-600 rounded-lg">
                 <CheckCircle2 className="h-4 w-4" />
                 <span className="text-sm">
-                  {rawData.length} registros carregados!
+                  {rawData.length} registros carregados do ERP
                 </span>
               </div>
             )}
