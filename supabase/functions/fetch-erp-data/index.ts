@@ -145,12 +145,13 @@ serve(async (req) => {
     }
 
     const authToken = loginResult.data.token;
-    console.log('ERP login successful');
+    console.log('ERP login successful, token received');
 
     // Extract session cookies
     const cookies = loginResponse.headers.get('set-cookie');
     
     console.log('Session established, fetching sales data...');
+    console.log('Using Authorization header with Bearer token');
 
     // Step 2: Fetch sales data using the vendasEmissorExpandido endpoint
     const salesUrl = `${erpUrl}/api/vendas/vendasEmissorExpandido`;
@@ -160,7 +161,7 @@ serve(async (req) => {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'Authorization': authToken,
+        'Authorization': `Bearer ${authToken}`,
         'Cookie': cookies || '',
       },
       body: JSON.stringify({
