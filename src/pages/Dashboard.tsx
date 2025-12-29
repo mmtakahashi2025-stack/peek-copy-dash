@@ -24,7 +24,7 @@ interface Filters {
 }
 
 export default function Dashboard() {
-  const { rawData, isLoading, isConnected, getKpis, getColaboradores, getProdutos, fetchExcellencePercentage, fetchLeadsTotal, loadErpData, erpCredentials, refreshErpCredentials, loadingProgress } = useSheetData();
+  const { rawData, isLoading, isConnected, getKpis, getColaboradores, getProdutos, fetchExcellencePercentage, fetchLeadsTotal, loadErpData, cancelLoading, erpCredentials, refreshErpCredentials, loadingProgress } = useSheetData();
   
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [filters, setFilters] = useState<Filters>({
@@ -165,7 +165,7 @@ export default function Dashboard() {
         />
 
         {/* Loading Progress Indicator */}
-        <LoadingProgress progress={loadingProgress} />
+        <LoadingProgress progress={loadingProgress} onCancel={cancelLoading} />
 
         {/* KPI Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

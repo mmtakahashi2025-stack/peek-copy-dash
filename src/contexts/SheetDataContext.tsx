@@ -128,6 +128,7 @@ export interface LoadingProgressState {
   currentMonth: string | null;
   recordsLoaded: number;
   errors: string[];
+  isCancelled: boolean;
 }
 
 interface SheetDataContextType {
@@ -146,6 +147,7 @@ interface SheetDataContextType {
   getEvolucao: () => EvolucaoData[];
   getProdutos: (filialId: string) => ProdutoData[];
   loadErpData: (dateFrom?: Date, dateTo?: Date, forceRefresh?: boolean) => Promise<void>;
+  cancelLoading: () => void;
   refreshData: () => Promise<void>;
   testErpLogin: () => Promise<LoginTestResult>;
   fetchExcellencePercentage: (dateFilter?: DateFilter) => Promise<number | null>;
@@ -213,7 +215,16 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     currentMonth: null,
     recordsLoaded: 0,
     errors: [],
+    isCancelled: false,
   });
+  const [cancelRequested, setCancelRequested] = useState(false);
+
+  // Cancel loading function
+  const cancelLoading = useCallback(() => {
+    setCancelRequested(true);
+    setLoadingProgress(prev => ({ ...prev, isCancelled: true }));
+    toast.info('Cancelando carregamento...');
+  }, []);
 
   // Cache hook
   const { 
@@ -416,6 +427,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   const loadErpDataProgressive = useCallback(async (startDate: Date, endDate: Date) => {
     const periods = generateMonthlyPeriods(startDate, endDate);
     
+    setCancelRequested(false);
     setLoadingProgress({
       isActive: true,
       totalMonths: periods.length,
@@ -423,6 +435,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       currentMonth: periods[0]?.label || null,
       recordsLoaded: 0,
       errors: [],
+      isCancelled: false,
     });
 
     const allData: RawSaleRow[] = [];
@@ -432,6 +445,12 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     const BATCH_SIZE = 3;
     
     for (let i = 0; i < periods.length; i += BATCH_SIZE) {
+      // Check for cancellation
+      if (cancelRequested) {
+        toast.info('Carregamento cancelado');
+        break;
+      }
+      
       const batch = periods.slice(i, i + BATCH_SIZE);
       
       // Update current month label
@@ -993,6 +1012,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       getEvolucao,
       getProdutos,
       loadErpData,
+      cancelLoading,
       refreshData,
       testErpLogin,
       fetchExcellencePercentage,
