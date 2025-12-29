@@ -118,23 +118,8 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Get ERP base URL from env
-  let erpBaseUrl = Deno.env.get('ERP_API_URL') || '';
-  
-  // Normalize the base URL
-  if (erpBaseUrl.includes('/api/auth/login')) {
-    erpBaseUrl = erpBaseUrl.replace('/api/auth/login', '');
-  }
-  if (erpBaseUrl.endsWith('/')) {
-    erpBaseUrl = erpBaseUrl.slice(0, -1);
-  }
-
-  if (!erpBaseUrl) {
-    return new Response(
-      JSON.stringify({ success: false, error: 'URL do ERP não configurada' }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
-  }
+  // ERP API base URL - hardcoded
+  const erpBaseUrl = 'https://api.hoteltarobafoz.com.br/erp-json';
 
   // Parse request body
   let startDate: string;
@@ -175,7 +160,7 @@ serve(async (req) => {
 
   try {
     // STEP 1: LOGIN
-    const loginUrl = `${erpBaseUrl}/api/auth/login?email=${encodeURIComponent(erpEmail)}&password=${encodeURIComponent(erpPassword)}`;
+    const loginUrl = `${erpBaseUrl}/auth/login?email=${encodeURIComponent(erpEmail)}&password=${encodeURIComponent(erpPassword)}`;
 
     console.log('[ERP] Autenticando...');
 
@@ -230,7 +215,7 @@ serve(async (req) => {
     // STEP 2: FETCH SALES
     const jwtToken = loginResult.data.token;
     const cookieHeader = `ERPSession=${cookies.ERPSession}; device_id=${cookies.device_id}`;
-    const salesUrl = `${erpBaseUrl}/api/vendas/vendasEmissorExpandido`;
+    const salesUrl = `${erpBaseUrl}/vendas/vendasEmissorExpandido`;
     const salesBody = JSON.stringify({
       StartDate: startDate,
       EndDate: endDate,
