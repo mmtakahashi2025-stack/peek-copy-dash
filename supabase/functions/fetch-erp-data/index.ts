@@ -128,6 +128,33 @@ function formatDate(date: Date): string {
   return `${day}/${month}/${year}`;
 }
 
+// ERP API limit - if we hit this, we need finer pagination
+const ERP_API_LIMIT = 5000;
+
+// Generate weekly periods for a given month
+function generateWeeklyPeriods(monthStart: Date, monthEnd: Date): Array<{ start: string; end: string }> {
+  const periods: Array<{ start: string; end: string }> = [];
+  let current = new Date(monthStart);
+  
+  while (current <= monthEnd) {
+    const periodStart = new Date(current);
+    // End of week (7 days) or end of month, whichever is earlier
+    const weekEnd = new Date(current);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const periodEnd = weekEnd > monthEnd ? monthEnd : weekEnd;
+    
+    periods.push({
+      start: formatDate(periodStart),
+      end: formatDate(periodEnd),
+    });
+    
+    // Move to next week
+    current.setDate(current.getDate() + 7);
+  }
+  
+  return periods;
+}
+
 // Generate monthly periods between two dates
 function generateMonthlyPeriods(startDate: string, endDate: string): Array<{ start: string; end: string }> {
   const start = parseDate(startDate);
@@ -351,7 +378,7 @@ serve(async (req) => {
     const shouldPaginate = usePagination && isLargeDateRange(startDate, endDate);
     
     if (shouldPaginate) {
-      // Use monthly pagination
+      // Use monthly pagination with automatic weekly subdivision if limit is hit
       const periods = generateMonthlyPeriods(startDate, endDate);
       console.log(`[ERP] Usando paginação mensal: ${periods.length} períodos`);
       
@@ -365,7 +392,42 @@ serve(async (req) => {
         );
         
         if (result.success && result.data) {
-          allData = [...allData, ...result.data];
+          // Check if we hit the API limit - if so, use weekly pagination for this month
+          if (result.data.length >= ERP_API_LIMIT) {
+            console.log(`[ERP] Limite atingido em ${period.start}-${period.end}, usando paginação semanal...`);
+            
+            const monthStart = parseDate(period.start);
+            const monthEnd = parseDate(period.end);
+            const weeklyPeriods = generateWeeklyPeriods(monthStart, monthEnd);
+            
+            let monthData: TransformedSaleRow[] = [];
+            
+            for (const weekPeriod of weeklyPeriods) {
+              const weekResult = await fetchSalesForPeriod(
+                erpBaseUrl,
+                authResult.token,
+                authResult.cookies,
+                weekPeriod.start,
+                weekPeriod.end
+              );
+              
+              if (weekResult.success && weekResult.data) {
+                monthData = [...monthData, ...weekResult.data];
+                
+                // If still hitting limit on weekly, log warning
+                if (weekResult.data.length >= ERP_API_LIMIT) {
+                  console.warn(`[ERP] AVISO: Limite atingido na semana ${weekPeriod.start}-${weekPeriod.end}. Dados podem estar incompletos.`);
+                }
+              }
+              
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            console.log(`[ERP] Período ${period.start}-${period.end} com paginação semanal: ${monthData.length} registros`);
+            allData = [...allData, ...monthData];
+          } else {
+            allData = [...allData, ...result.data];
+          }
         } else {
           console.error(`[ERP] Erro no período ${period.start}-${period.end}:`, result.error);
           // Continue with other periods even if one fails
@@ -376,6 +438,10 @@ serve(async (req) => {
       }
       
       console.log(`[ERP] Total após paginação: ${allData.length} registros`);
+      
+      // Log unique sales count for debugging
+      const uniqueSales = new Set(allData.map(row => row['Venda #']));
+      console.log(`[ERP] Vendas únicas: ${uniqueSales.size}`);
     } else {
       // Single request for short periods
       const result = await fetchSalesForPeriod(
