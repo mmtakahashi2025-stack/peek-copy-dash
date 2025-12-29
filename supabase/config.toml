@@ -1,9 +1,10 @@
 project_id = "vpxbaxjwppiyodjzqsqo"
 
 [functions.fetch-sheets]
-# Disabled platform JWT verification due to ES256 token incompatibility in this runtime.
-# We still enforce authentication inside the function via supabaseClient.auth.getUser().
 verify_jwt = false
 
 [functions.fetch-erp-data]
+verify_jwt = false
+
+[functions.test-erp-login]
 verify_jwt = false

@@ -16,11 +16,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { Loader2, CheckCircle2, AlertCircle, RefreshCw, Database, Clock, FileText, Activity, CalendarIcon } from 'lucide-react';
-import { useSheetData } from '@/contexts/SheetDataContext';
+import { Loader2, CheckCircle2, AlertCircle, RefreshCw, Database, Clock, FileText, Activity, CalendarIcon, KeyRound, User } from 'lucide-react';
+import { useSheetData, LoginTestResult } from '@/contexts/SheetDataContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
 
 function formatDateTime(date: Date | null): string {
   if (!date) return '--';
@@ -36,12 +37,16 @@ function formatDateTime(date: Date | null): string {
 
 export function SheetConfigDialog() {
   const [open, setOpen] = useState(false);
-  const { rawData, isLoading, error, isConnected, diagnostic, loadErpData, refreshData } = useSheetData();
+  const { rawData, isLoading, error, isConnected, diagnostic, loadErpData, refreshData, testErpLogin } = useSheetData();
   
   // Date range state - default to current month
   const now = new Date();
   const [dateFrom, setDateFrom] = useState<Date>(new Date(now.getFullYear(), now.getMonth(), 1));
   const [dateTo, setDateTo] = useState<Date>(now);
+
+  // Login test state
+  const [isTestingLogin, setIsTestingLogin] = useState(false);
+  const [loginTestResult, setLoginTestResult] = useState<LoginTestResult | null>(null);
 
   const handleRefresh = async () => {
     await refreshData();
@@ -49,6 +54,24 @@ export function SheetConfigDialog() {
 
   const handleLoadData = async () => {
     await loadErpData(dateFrom, dateTo);
+  };
+
+  const handleTestLogin = async () => {
+    setIsTestingLogin(true);
+    setLoginTestResult(null);
+    
+    try {
+      const result = await testErpLogin();
+      setLoginTestResult(result);
+      
+      if (result.success && result.loginSuccess) {
+        toast.success(`Login OK: ${result.user?.name || 'Usuário autenticado'}`);
+      } else {
+        toast.error(result.error || 'Falha no login');
+      }
+    } finally {
+      setIsTestingLogin(false);
+    }
   };
 
   const hasData = rawData.length > 0;
@@ -213,11 +236,25 @@ export function SheetConfigDialog() {
                 </div>
               </div>
 
+              {/* Action Buttons */}
               <div className="flex gap-2">
                 <Button 
                   variant="outline" 
+                  onClick={handleTestLogin}
+                  disabled={isTestingLogin || isLoading}
+                  className="gap-2"
+                >
+                  {isTestingLogin ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <KeyRound className="h-4 w-4" />
+                  )}
+                  Testar Login
+                </Button>
+                <Button 
+                  variant="outline" 
                   onClick={handleLoadData}
-                  disabled={isLoading}
+                  disabled={isLoading || isTestingLogin}
                   className="flex-1"
                 >
                   {isLoading ? (
@@ -229,13 +266,65 @@ export function SheetConfigDialog() {
                     'Carregar Dados'
                   )}
                 </Button>
-                <Button 
-                  onClick={() => setOpen(false)}
-                  className="flex-1"
-                >
-                  Fechar
-                </Button>
               </div>
+
+              <Button 
+                onClick={() => setOpen(false)}
+                className="w-full"
+              >
+                Fechar
+              </Button>
+
+              {/* Login Test Result */}
+              {loginTestResult && (
+                <div className={cn(
+                  "p-4 rounded-lg space-y-2",
+                  loginTestResult.success && loginTestResult.loginSuccess 
+                    ? "bg-green-500/10 border border-green-500/20" 
+                    : "bg-destructive/10 border border-destructive/20"
+                )}>
+                  <div className="flex items-center gap-2">
+                    {loginTestResult.success && loginTestResult.loginSuccess ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-600" />
+                    ) : (
+                      <AlertCircle className="h-4 w-4 text-destructive" />
+                    )}
+                    <span className={cn(
+                      "text-sm font-medium",
+                      loginTestResult.success && loginTestResult.loginSuccess 
+                        ? "text-green-600" 
+                        : "text-destructive"
+                    )}>
+                      {loginTestResult.success && loginTestResult.loginSuccess 
+                        ? 'Login Bem-sucedido' 
+                        : 'Falha no Login'}
+                    </span>
+                  </div>
+                  
+                  {loginTestResult.user && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground pl-6">
+                      <User className="h-3 w-3" />
+                      <span>{loginTestResult.user.name} ({loginTestResult.user.email})</span>
+                    </div>
+                  )}
+                  
+                  {loginTestResult.session && (
+                    <div className="text-xs text-muted-foreground pl-6 space-y-1">
+                      <p>Token: {loginTestResult.session.hasToken ? '✓' : '✗'}</p>
+                      <p>ERPSession: {loginTestResult.session.hasERPSession ? '✓' : '✗'}</p>
+                      <p>device_id: {loginTestResult.session.hasDeviceId ? '✓' : '✗'}</p>
+                    </div>
+                  )}
+                  
+                  {loginTestResult.message && (
+                    <p className="text-xs text-muted-foreground pl-6">{loginTestResult.message}</p>
+                  )}
+                  
+                  {loginTestResult.error && (
+                    <p className="text-xs text-destructive pl-6">{loginTestResult.error}</p>
+                  )}
+                </div>
+              )}
 
               {error && (
                 <div className="flex items-center gap-2 p-3 bg-destructive/10 text-destructive rounded-lg">
