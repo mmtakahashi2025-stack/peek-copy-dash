@@ -132,10 +132,31 @@ function formatDate(date: Date): string {
 const ERP_API_LIMIT = 5000;
 
 // Reduced delay for weekly pagination within a single month (to stay under timeout)
-const WEEKLY_DELAY_MS = 300;
+const WEEKLY_DELAY_MS = 100;
+
+// Request timeout in milliseconds (20s to stay well under Cloudflare's 30s limit)
+const REQUEST_TIMEOUT_MS = 20000;
 
 // Helper function for delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Fetch with timeout to prevent hanging connections
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return response;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Request timeout - conexão com ERP demorou muito');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 // Generate weekly periods for a given month
 function generateWeeklyPeriods(monthStart: Date, monthEnd: Date): Array<{ start: string; end: string }> {
@@ -211,13 +232,13 @@ async function authenticateERP(erpBaseUrl: string, erpEmail: string, erpPassword
 
   console.log('[ERP] Autenticando...');
 
-  const loginResponse = await fetch(loginUrl, {
+  const loginResponse = await fetchWithTimeout(loginUrl, {
     method: 'GET',
     headers: {
       'Accept': 'application/json',
       'User-Agent': 'Mozilla/5.0',
     },
-  });
+  }, REQUEST_TIMEOUT_MS);
 
   console.log('[ERP] Login status:', loginResponse.status);
 
@@ -269,7 +290,7 @@ async function fetchSalesForPeriod(
 
   console.log(`[ERP] Buscando vendas de ${startDate} até ${endDate}...`);
 
-  const salesResponse = await fetch(salesUrl, {
+  const salesResponse = await fetchWithTimeout(salesUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -279,7 +300,7 @@ async function fetchSalesForPeriod(
       'User-Agent': 'Mozilla/5.0',
     },
     body: salesBody,
-  });
+  }, REQUEST_TIMEOUT_MS);
 
   console.log('[ERP] Sales status:', salesResponse.status);
 
