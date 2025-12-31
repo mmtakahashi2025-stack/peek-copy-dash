@@ -374,22 +374,20 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   // Data is kept in React state only and fetched fresh on each session.
 
   // Subscribe to realtime updates from other users
+  // NOTE: We only notify the user, but don't replace local data because:
+  // 1. Realtime broadcast has payload size limits (~2MB) which can truncate large datasets
+  // 2. Each user should manage their own data loading from the database cache
   useEffect(() => {
     const channel = supabase
       .channel('erp-data-sync')
       .on('broadcast', { event: 'erp-updated' }, (payload) => {
         console.log('Received ERP update from another user');
-        const { data } = payload.payload as { data: RawSaleRow[] };
+        const { recordCount, period } = payload.payload as { recordCount?: number; period?: string };
         
-        if (!Array.isArray(data) || data.length === 0 || data.length > 50000) {
-          console.error('Invalid broadcast data received - rejecting');
-          return;
+        // Only show notification, don't replace local data to avoid truncation issues
+        if (recordCount && recordCount > 0) {
+          toast.info(`Novos dados disponíveis (${recordCount.toLocaleString('pt-BR')} registros de ${period || 'período recente'})`);
         }
-        
-        setRawData(data);
-        setIsConnected(true);
-        // Note: No longer caching in sessionStorage for security
-        toast.info('Dados atualizados por outro usuário');
       })
       .subscribe();
 
@@ -398,12 +396,13 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const broadcastUpdate = useCallback(async (data: RawSaleRow[]) => {
+  // Broadcast a notification to other users (metadata only, not full data)
+  const broadcastUpdate = useCallback(async (recordCount: number, period: string) => {
     const channel = supabase.channel('erp-data-sync');
     await channel.send({
       type: 'broadcast',
       event: 'erp-updated',
-      payload: { data },
+      payload: { recordCount, period },
     });
   }, []);
 
@@ -586,8 +585,9 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
 
     const MAX_ROWS_BACKGROUND_OPS = 50000;
     if (combinedData.length <= MAX_ROWS_BACKGROUND_OPS) {
+      const periodLabel = `${startDate.toLocaleDateString('pt-BR')} - ${endDate.toLocaleDateString('pt-BR')}`;
       setTimeout(() => {
-        void broadcastUpdate(combinedData);
+        void broadcastUpdate(combinedData.length, periodLabel);
       }, 0);
     }
 
@@ -673,8 +673,9 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
           }
         }, 0);
 
+        const periodLabel = `${startDate.toLocaleDateString('pt-BR')} - ${endDate.toLocaleDateString('pt-BR')}`;
         setTimeout(() => {
-          void broadcastUpdate(data);
+          void broadcastUpdate(data.length, periodLabel);
         }, 0);
       }
 
