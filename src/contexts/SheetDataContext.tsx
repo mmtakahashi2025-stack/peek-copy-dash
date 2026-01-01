@@ -797,6 +797,11 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
 
     // Filter by date if provided
     if (dateFilter?.dateFrom || dateFilter?.dateTo) {
+      // Normalize dateTo to end of day (23:59:59.999) to include all sales from that day
+      const toDateEndOfDay = dateFilter.dateTo 
+        ? new Date(dateFilter.dateTo.getFullYear(), dateFilter.dateTo.getMonth(), dateFilter.dateTo.getDate(), 23, 59, 59, 999)
+        : undefined;
+      
       filteredData = filteredData.filter(r => {
         const dataVenda = r['Data Venda'];
         if (!dataVenda) return true;
@@ -814,10 +819,9 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         if (!rowDate || isNaN(rowDate.getTime())) return true;
         
         const fromDate = dateFilter.dateFrom;
-        const toDate = dateFilter.dateTo;
         
         if (fromDate && rowDate < fromDate) return false;
-        if (toDate && rowDate > toDate) return false;
+        if (toDateEndOfDay && rowDate > toDateEndOfDay) return false;
         
         return true;
       });

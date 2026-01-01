@@ -102,12 +102,17 @@ const parseRowDate = (dataVenda: number | string): Date | null => {
 const filterByDateRange = (data: RawSaleRow[], dateFrom?: Date, dateTo?: Date): RawSaleRow[] => {
   if (!dateFrom && !dateTo) return data;
   
+  // Normalize dateTo to end of day (23:59:59.999) to include all sales from that day
+  const dateToEndOfDay = dateTo 
+    ? new Date(dateTo.getFullYear(), dateTo.getMonth(), dateTo.getDate(), 23, 59, 59, 999)
+    : undefined;
+  
   return data.filter(r => {
     const rowDate = parseRowDate(r['Data Venda']);
     if (!rowDate || isNaN(rowDate.getTime())) return false;
     
     if (dateFrom && rowDate < dateFrom) return false;
-    if (dateTo && rowDate > dateTo) return false;
+    if (dateToEndOfDay && rowDate > dateToEndOfDay) return false;
     
     return true;
   });
