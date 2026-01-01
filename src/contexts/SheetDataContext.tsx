@@ -495,11 +495,15 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       
       // Calculate period dates for this month
       const periodStart = new Date(monthInfo.year, monthInfo.month - 1, 1);
-      const periodEnd = new Date(monthInfo.year, monthInfo.month, 0);
+      const periodEnd = new Date(monthInfo.year, monthInfo.month, 0); // Last day of month
       
-      // Adjust start/end if this is first/last month in range
-      const actualStart = periodStart < startDate ? startDate : periodStart;
-      const actualEnd = periodEnd > endDate ? endDate : periodEnd;
+      // Check if we're fetching the complete month (from day 1 to last day)
+      const isCompleteMonth = periodStart >= startDate && periodEnd <= endDate;
+      
+      // For ERP fetch, always get the full month to ensure cache integrity
+      // Only use partial range if this is a truly partial request
+      const actualStart = isCompleteMonth ? periodStart : (periodStart < startDate ? startDate : periodStart);
+      const actualEnd = isCompleteMonth ? periodEnd : (periodEnd > endDate ? endDate : periodEnd);
       
       const MAX_RETRIES = 2;
       let lastError = '';
@@ -534,8 +538,14 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
           monthData = (response?.data || []) as RawSaleRow[];
           success = true;
           
-          // Save this month to cache immediately (async)
-          await setMonthData(monthInfo.year, monthInfo.month, monthData);
+          // Only save to cache if we fetched the COMPLETE month
+          // This prevents partial data from being cached as if it were complete
+          if (isCompleteMonth) {
+            await setMonthData(monthInfo.year, monthInfo.month, monthData);
+            console.log(`[Cache] Saved complete month ${monthInfo.label}: ${monthData.length} records`);
+          } else {
+            console.log(`[Cache] Skipped saving partial month ${monthInfo.label} (${actualStart.getDate()}/${actualStart.getMonth()+1} - ${actualEnd.getDate()}/${actualEnd.getMonth()+1})`);
+          }
           
           break;
         } catch (err) {
