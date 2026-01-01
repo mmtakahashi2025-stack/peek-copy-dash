@@ -269,6 +269,10 @@ export function useErpCache() {
       
       // Filter data to exact date range
       if (allMonthsCached && allData.length > 0) {
+        // Normalize dateTo to end of day (23:59:59.999) to include all sales from that day
+        const dateToEndOfDay = new Date(dateTo);
+        dateToEndOfDay.setHours(23, 59, 59, 999);
+        
         const filtered = allData.filter(row => {
           const dataVenda = row['Data Venda'];
           if (!dataVenda) return true;
@@ -280,7 +284,7 @@ export function useErpCache() {
           
           if (!rowDate || isNaN(rowDate.getTime())) return true;
           
-          return rowDate >= dateFrom && rowDate <= dateTo;
+          return rowDate >= dateFrom && rowDate <= dateToEndOfDay;
         });
         
         console.log(`[Cache] Combined ${allData.length} records from Supabase cache, filtered to ${filtered.length}`);
