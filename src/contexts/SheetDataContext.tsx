@@ -398,12 +398,20 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
 
   // Broadcast a notification to other users (metadata only, not full data)
   const broadcastUpdate = useCallback(async (recordCount: number, period: string) => {
-    const channel = supabase.channel('erp-data-sync');
-    await channel.send({
-      type: 'broadcast',
-      event: 'erp-updated',
-      payload: { recordCount, period },
-    });
+    const channel = supabase.channel('erp-data-sync-broadcast');
+    try {
+      await channel.subscribe();
+      await channel.send({
+        type: 'broadcast',
+        event: 'erp-updated',
+        payload: { recordCount, period },
+      });
+    } catch (err) {
+      console.warn('[Broadcast] Failed to send update:', err);
+    } finally {
+      // Always cleanup the channel after sending
+      await supabase.removeChannel(channel);
+    }
   }, []);
 
   // Helper: Generate monthly periods
@@ -550,11 +558,15 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
           break;
         } catch (err) {
           lastError = err instanceof Error ? err.message : 'Erro';
+          const isRateLimit = lastError.toLowerCase().includes('rate') || lastError.includes('429') || lastError.includes('too many');
+          const isTimeout = lastError.toLowerCase().includes('timeout');
+          
           console.warn(`[ERP] ${monthInfo.label} tentativa ${attempt + 1}/${MAX_RETRIES + 1} falhou:`, lastError);
           
-          // Wait before retry (exponential backoff)
+          // Wait before retry (exponential backoff, longer for rate limits)
           if (attempt < MAX_RETRIES) {
-            await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+            const baseDelay = isRateLimit ? 5000 : isTimeout ? 3000 : 2000;
+            await new Promise(r => setTimeout(r, baseDelay * (attempt + 1)));
           }
         }
       }
@@ -576,6 +588,21 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       if (i < monthsToRefresh.length - 1) {
         await new Promise(r => setTimeout(r, 500));
       }
+    }
+    
+    // Handle cancellation - reset state properly
+    if (cancelRequested) {
+      setCancelRequested(false);
+      setLoadingProgress(prev => ({ ...prev, isActive: false, isCancelled: true }));
+      setIsLoading(false);
+      // Don't update rawData with partial data on cancellation
+      // Keep previous data intact
+      setDiagnostic(prev => ({
+        ...prev,
+        status: 'idle',
+        lastError: 'Carregamento cancelado pelo usuário',
+      }));
+      return;
     }
     
     // Combine cached and fetched data
@@ -709,6 +736,15 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     const startDate = dateFrom || new Date(now.getFullYear(), now.getMonth(), 1);
     const endDate = dateTo || now;
     
+    // Validate maximum period (12 months max to prevent ERP overload)
+    const MAX_MONTHS = 12;
+    const diffMonths = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
+    
+    if (diffMonths > MAX_MONTHS) {
+      toast.error(`Período máximo permitido: ${MAX_MONTHS} meses. Selecione um intervalo menor.`);
+      return;
+    }
+    
     setIsLoading(true);
     setError(null);
     
@@ -719,8 +755,6 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       period: { from: formatDateForErp(startDate), to: formatDateForErp(endDate) },
     }));
 
-    // Check if this is a large date range (more than 1 month)
-    const diffMonths = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
     const isLargeRange = diffMonths >= 1;
 
     if (isLargeRange) {

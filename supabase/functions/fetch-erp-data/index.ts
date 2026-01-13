@@ -228,16 +228,19 @@ interface AuthResult {
 }
 
 async function authenticateERP(erpBaseUrl: string, erpEmail: string, erpPassword: string): Promise<AuthResult> {
-  const loginUrl = `${erpBaseUrl}/auth/login?email=${encodeURIComponent(erpEmail)}&password=${encodeURIComponent(erpPassword)}`;
+  // SECURITY FIX: Use POST with body instead of GET with credentials in URL
+  const loginUrl = `${erpBaseUrl}/auth/login`;
 
   console.log('[ERP] Autenticando...');
 
   const loginResponse = await fetchWithTimeout(loginUrl, {
-    method: 'GET',
+    method: 'POST',
     headers: {
       'Accept': 'application/json',
+      'Content-Type': 'application/json',
       'User-Agent': 'Mozilla/5.0',
     },
+    body: JSON.stringify({ email: erpEmail, password: erpPassword }),
   }, REQUEST_TIMEOUT_MS);
 
   console.log('[ERP] Login status:', loginResponse.status);
