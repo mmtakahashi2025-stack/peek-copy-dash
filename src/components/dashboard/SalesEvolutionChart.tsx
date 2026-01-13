@@ -135,7 +135,10 @@ const groupByMonth = (data: RawSaleRow[]): { [key: number]: { vendas: Set<number
     if (row['Venda #']) {
       monthlyData[month].vendas.add(row['Venda #']);
     }
-    monthlyData[month].faturamento += row.Líquido || 0;
+    // Exclude 'PC' (Pacote) type items from revenue calculation
+    if (row.Tipo !== 'PC') {
+      monthlyData[month].faturamento += row.Líquido || 0;
+    }
   });
   
   return monthlyData;

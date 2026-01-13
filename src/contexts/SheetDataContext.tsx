@@ -901,11 +901,13 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       ];
     }
 
-    // Aggregate data
+    // Aggregate data - exclude 'PC' (Pacote) type items from revenue calculation
+    // as they are bundle items and their value is already included in sub-items
     const vendaIds = new Set(filteredData.map(r => r['Venda #']));
     const totalVendas = vendaIds.size;
-    const totalFaturamento = filteredData.reduce((sum, r) => sum + (r.Líquido || 0), 0);
-    const totalLucro = filteredData.reduce((sum, r) => sum + (r.Lucro || 0), 0);
+    const revenueData = filteredData.filter(r => r.Tipo !== 'PC');
+    const totalFaturamento = revenueData.reduce((sum, r) => sum + (r.Líquido || 0), 0);
+    const totalLucro = revenueData.reduce((sum, r) => sum + (r.Lucro || 0), 0);
     const totalQuantidade = filteredData.reduce((sum, r) => sum + (r.Quantidade || 0), 0);
     const ticketMedio = totalVendas > 0 ? totalFaturamento / totalVendas : 0;
     const lucroPercent = totalFaturamento > 0 ? (totalLucro / totalFaturamento) * 100 : 0;
@@ -1035,7 +1037,10 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         byEmissor[emissor] = { vendas: new Set(), faturamento: 0, filial: row.Filial };
       }
       byEmissor[emissor].vendas.add(row['Venda #']);
-      byEmissor[emissor].faturamento += row.Líquido || 0;
+      // Exclude 'PC' (Pacote) type items from revenue calculation
+      if (row.Tipo !== 'PC') {
+        byEmissor[emissor].faturamento += row.Líquido || 0;
+      }
     });
 
     const result = Object.entries(byEmissor)
