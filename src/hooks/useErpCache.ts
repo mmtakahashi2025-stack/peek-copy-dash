@@ -158,10 +158,16 @@ export function useErpCache() {
   }, [user]);
 
   // Save a single month to Supabase cache using upsert to avoid duplicate key errors
-  const saveMonthToCache = useCallback(async (year: number, month: number, data: RawSaleRow[]): Promise<void> => {
-    if (!user) return;
+  const saveMonthToCache = useCallback(async (year: number, month: number, data: RawSaleRow[]): Promise<boolean> => {
+    if (!user) return false;
 
     try {
+      // Validate data before saving
+      if (!Array.isArray(data)) {
+        console.error(`[Cache] Invalid data format for month ${year}-${month}: not an array`);
+        return false;
+      }
+      
       // Use upsert to handle both insert and update in a single operation
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error } = await (supabase
@@ -179,12 +185,15 @@ export function useErpCache() {
 
       if (error) {
         console.error(`[Cache] Error saving month ${year}-${month}:`, error);
-        return;
+        // Don't throw, just log and return false to indicate failure
+        return false;
       }
 
       console.log(`[Cache] Saved month ${year}-${month}: ${data.length} records to Supabase`);
+      return true;
     } catch (error) {
-      console.error(`[Cache] Error saving month ${year}-${month}:`, error);
+      console.error(`[Cache] Unexpected error saving month ${year}-${month}:`, error);
+      return false;
     }
   }, [user]);
 
@@ -218,9 +227,12 @@ export function useErpCache() {
   }, [loadMonthFromCache]);
 
   // Save data for a specific month
-  const setMonthData = useCallback(async (year: number, month: number, data: RawSaleRow[]): Promise<void> => {
-    await saveMonthToCache(year, month, data);
-    await updateCacheMeta();
+  const setMonthData = useCallback(async (year: number, month: number, data: RawSaleRow[]): Promise<boolean> => {
+    const success = await saveMonthToCache(year, month, data);
+    if (success) {
+      await updateCacheMeta();
+    }
+    return success;
   }, [saveMonthToCache, updateCacheMeta]);
 
   // Get all cached data for a date range (combines monthly caches)
@@ -328,15 +340,26 @@ export function useErpCache() {
         monthlyData.get(key)!.push(row);
       }
       
-      // Save each month (in parallel for speed)
-      const savePromises = Array.from(monthlyData).map(([key, monthData]) => {
+      // Save each month sequentially to avoid race conditions
+      // (parallel upserts can cause issues even with unique constraints)
+      let successCount = 0;
+      let failCount = 0;
+      
+      for (const [key, monthData] of monthlyData) {
         const [yearStr, monthStr] = key.split('-');
         const year = parseInt(yearStr);
         const month = parseInt(monthStr);
-        return setMonthData(year, month, monthData);
-      });
+        const success = await setMonthData(year, month, monthData);
+        if (success) {
+          successCount++;
+        } else {
+          failCount++;
+        }
+      }
       
-      await Promise.all(savePromises);
+      if (failCount > 0) {
+        console.warn(`[Cache] ${failCount} months failed to save, ${successCount} succeeded`);
+      }
       
       // Update consolidated cache metadata
       if (user) {
