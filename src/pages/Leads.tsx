@@ -68,6 +68,18 @@ export default function Leads() {
 
   useEffect(() => {
     loadRecords();
+    
+    // Listen for import events
+    const handleLeadsChanged = () => {
+      console.log('[Leads] Received lead_records_changed event, reloading...');
+      loadRecords();
+    };
+    
+    window.addEventListener('lead_records_changed', handleLeadsChanged);
+    
+    return () => {
+      window.removeEventListener('lead_records_changed', handleLeadsChanged);
+    };
   }, []);
 
   // Load targets when month/year changes
@@ -317,11 +329,20 @@ export default function Leads() {
       .sort((a, b) => b.total - a.total);
   }, [records, gridMonth]);
 
-  // Generate year options (current year and 2 years before/after)
+  // Generate year options dynamically from records + current year
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
-    return [currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
-  }, []);
+    const yearsFromRecords = records.map(r => {
+      const date = parseISO(r.record_date);
+      return date.getFullYear();
+    });
+    
+    // Include current year and all years from records
+    const uniqueYears = [...new Set([currentYear, ...yearsFromRecords])];
+    
+    // Sort descending (most recent first)
+    return uniqueYears.sort((a, b) => b - a);
+  }, [records]);
 
   if (authLoading || isRoleLoading) {
     return (

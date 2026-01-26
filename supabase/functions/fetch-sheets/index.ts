@@ -123,6 +123,28 @@ function extractSpreadsheetId(sheetUrl: string): string | null {
   }
 }
 
+// Extract gid from URL hash (e.g., #gid=123456)
+function extractGidFromUrl(sheetUrl: string): string | null {
+  try {
+    const hashMatch = sheetUrl.match(/#gid=(\d+)/);
+    if (hashMatch) return hashMatch[1];
+    
+    // Also check query param
+    const parsedUrl = new URL(sheetUrl);
+    const gidParam = parsedUrl.searchParams.get('gid');
+    if (gidParam && /^\d+$/.test(gidParam)) return gidParam;
+    
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Check if sheetName is a numeric gid
+function isNumericGid(sheetName: string): boolean {
+  return /^\d+$/.test(sheetName);
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -209,8 +231,26 @@ Deno.serve(async (req) => {
         );
       }
 
-      const gidParam = sheetName ? `&gid=${encodeURIComponent(sheetName)}` : '';
-      fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gidParam}`;
+      // Determine which sheet/tab to fetch
+      let sheetParam = '';
+      
+      if (sheetName) {
+        if (isNumericGid(sheetName)) {
+          // sheetName is a numeric gid
+          sheetParam = `&gid=${sheetName}`;
+        } else {
+          // sheetName is a tab name - use sheet parameter
+          sheetParam = `&sheet=${encodeURIComponent(sheetName)}`;
+        }
+      } else {
+        // Try to extract gid from URL if no sheetName provided
+        const extractedGid = extractGidFromUrl(sheetUrl);
+        if (extractedGid) {
+          sheetParam = `&gid=${extractedGid}`;
+        }
+      }
+
+      fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${sheetParam}`;
     }
 
     console.log('Fetching from:', fetchUrl, 'delimiter:', delimiter === '\t' ? 'TAB' : 'COMMA');
