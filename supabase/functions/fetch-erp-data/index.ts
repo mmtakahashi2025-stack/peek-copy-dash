@@ -1,6 +1,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.89.0";
 
+// Filiais permitidas para filtro de dados
+const ALLOWED_FILIAIS = [
+  'Combo Iguassu',
+  'Combo Iguassu Agências',
+  'Combo Iguassu Cataratas',
+  'Combo Iguassu Web',
+];
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -533,17 +541,23 @@ serve(async (req) => {
       allData = result.data || [];
     }
     
+    // Filter data to only include allowed branches (filiais)
+    const filteredData = allData.filter(row => ALLOWED_FILIAIS.includes(row.Filial));
+    
+    console.log(`[ERP] Registros antes do filtro: ${allData.length}`);
+    console.log(`[ERP] Registros após filtro de filiais: ${filteredData.length}`);
+    
     // Log unique sales count and total revenue for verification
-    const uniqueSales = new Set(allData.map(row => row['Venda #']));
-    const totalRevenue = allData.reduce((sum, row) => sum + (row.Líquido || 0), 0);
-    console.log(`[ERP] Sucesso! ${allData.length} registros totais`);
+    const uniqueSales = new Set(filteredData.map(row => row['Venda #']));
+    const totalRevenue = filteredData.reduce((sum, row) => sum + (row.Líquido || 0), 0);
+    console.log(`[ERP] Sucesso! ${filteredData.length} registros totais`);
     console.log(`[ERP] Vendas únicas: ${uniqueSales.size} | Faturamento: R$ ${totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        data: allData,
-        count: allData.length,
+        data: filteredData,
+        count: filteredData.length,
         period: { startDate, endDate },
         user: authResult.user?.name,
       }),
