@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 import { useSheetData } from '@/contexts/SheetDataContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -37,7 +39,9 @@ const MONTHS = [
 ];
 
 export default function Leads() {
+  const { user, loading: authLoading } = useAuth();
   const { colaboradores } = useSheetData();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('grid');
   
   // State
@@ -53,6 +57,12 @@ export default function Leads() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   const gridMonth = useMemo(() => new Date(selectedYear, selectedMonth, 1), [selectedYear, selectedMonth]);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      navigate('/auth');
+    }
+  }, [user, authLoading, navigate]);
 
   useEffect(() => {
     loadRecords();
@@ -310,6 +320,14 @@ export default function Leads() {
     const currentYear = new Date().getFullYear();
     return [currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
   }, []);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">

@@ -239,20 +239,45 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     monthsToRefresh: MONTHS_TO_REFRESH_CONFIG,
   } = useErpCache();
 
-  // ERP credentials - now using system-wide credentials from environment
+  // Fetch ERP credentials from profile using secure RPC function
   const refreshErpCredentials = useCallback(async () => {
-    // In public mode, we don't need user-specific credentials
-    // The edge function will use environment variables as fallback
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setErpCredentials(null);
+      return;
+    }
+
+    // Use the secure RPC function to get decrypted password
+    const { data: decryptedPassword, error } = await supabase.rpc('get_erp_password', {
+      target_user_id: user.id
+    });
+
+    if (error) {
+      console.error('Error fetching ERP credentials:', error);
+      setErpCredentials({
+        email: user.email || '',
+        password: null,
+        hasPassword: false,
+      });
+      return;
+    }
+
     setErpCredentials({
-      email: '',
-      password: null,
-      hasPassword: false,
+      email: user.email || '',
+      password: decryptedPassword || null,
+      hasPassword: !!decryptedPassword,
     });
   }, []);
 
-  // Load credentials on mount
+  // Load credentials on mount and auth changes
   useEffect(() => {
     refreshErpCredentials();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      refreshErpCredentials();
+    });
+
+    return () => subscription.unsubscribe();
   }, [refreshErpCredentials]);
 
   // Fetch KPI targets from database
