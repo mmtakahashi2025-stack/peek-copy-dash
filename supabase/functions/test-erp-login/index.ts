@@ -1,9 +1,82 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.89.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+type SystemSettingsRow = {
+  setting_key: string;
+  setting_value: string | null;
+  encrypted_value: string | null;
+};
+
+const DEFAULT_ERP_BASE_URL = 'https://api.hoteltarobafoz.com.br/erp-json';
+
+async function getSystemErpCredentials(): Promise<{
+  email: string | null;
+  password: string | null;
+  source: 'system_settings' | 'env';
+}> {
+  const fromEnv = () => ({
+    email: Deno.env.get('ERP_API_EMAIL') ?? null,
+    password: Deno.env.get('ERP_API_PASSWORD') ?? null,
+    source: 'env' as const,
+  });
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceRoleKey) return fromEnv();
+
+  try {
+    const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+    const { data, error } = await admin
+      .from('system_settings')
+      .select('setting_key, setting_value, encrypted_value')
+      .in('setting_key', ['erp_email', 'erp_password']);
+    if (error) throw error;
+
+    const rows = (data ?? []) as SystemSettingsRow[];
+    const emailRow = rows.find((r) => r.setting_key === 'erp_email');
+    const passwordRow = rows.find((r) => r.setting_key === 'erp_password');
+
+    const email = (emailRow?.setting_value ?? '').trim();
+    const encryptedPassword = passwordRow?.encrypted_value ?? null;
+
+    if (email && encryptedPassword) {
+      const { data: decrypted, error: decError } = await admin.rpc('decrypt_erp_password', {
+        encrypted_password: encryptedPassword,
+      });
+      if (!decError && typeof decrypted === 'string' && decrypted.trim()) {
+        return { email, password: decrypted, source: 'system_settings' };
+      }
+    }
+  } catch (err) {
+    console.warn('[ERP-LOGIN-TEST] Falha ao obter credenciais do sistema, usando fallback env:', err);
+  }
+
+  return fromEnv();
+}
+
+// Request timeout in milliseconds
+const REQUEST_TIMEOUT_MS = 20000;
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Request timeout - conexão com ERP demorou muito');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 interface ERPLoginResponse {
   success: boolean;
@@ -64,12 +137,14 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const erpBaseUrl = Deno.env.get('ERP_API_URL');
-  const erpEmail = Deno.env.get('ERP_API_EMAIL');
-  const erpPassword = Deno.env.get('ERP_API_PASSWORD');
+  const erpBaseUrl = Deno.env.get('ERP_API_URL') || DEFAULT_ERP_BASE_URL;
+  const creds = await getSystemErpCredentials();
+  const erpEmail = creds.email;
+  const erpPassword = creds.password;
 
   console.log('[ERP-LOGIN-TEST] Iniciando teste de login...');
   console.log('[ERP-LOGIN-TEST] URL base:', erpBaseUrl ? 'Configurada' : 'NÃO CONFIGURADA');
+  console.log('[ERP-LOGIN-TEST] Origem credenciais:', creds.source);
   console.log('[ERP-LOGIN-TEST] Email:', erpEmail ? 'Configurado' : 'NÃO CONFIGURADO');
   console.log('[ERP-LOGIN-TEST] Senha:', erpPassword ? 'Configurada' : 'NÃO CONFIGURADA');
 
@@ -89,17 +164,23 @@ serve(async (req) => {
   }
 
   try {
-    const loginUrl = `${erpBaseUrl}/api/auth/login?email=${encodeURIComponent(erpEmail)}&password=${encodeURIComponent(erpPassword)}`;
+    const loginUrl = `${erpBaseUrl}/auth/login`;
     
     console.log('[ERP-LOGIN-TEST] Fazendo requisição de login...');
 
-    const loginResponse = await fetch(loginUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    const loginResponse = await fetchWithTimeout(
+      loginUrl,
+      {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0',
+        },
+        body: JSON.stringify({ email: erpEmail, password: erpPassword }),
       },
-    });
+      REQUEST_TIMEOUT_MS,
+    );
 
     const loginText = await loginResponse.text();
     console.log('[ERP-LOGIN-TEST] Status HTTP:', loginResponse.status);
