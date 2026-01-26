@@ -9,6 +9,8 @@ interface UserRoleHook {
   isAdmin: boolean;
   isManager: boolean;
   isAdminOrManager: boolean;
+  isReader: boolean;
+  canEdit: boolean;
   isLoading: boolean;
   refetch: () => Promise<void>;
 }
@@ -56,6 +58,8 @@ export function useUserRole(): UserRoleHook {
     isAdmin: role === 'admin',
     isManager: role === 'manager',
     isAdminOrManager: role === 'admin' || role === 'manager',
+    isReader: role !== 'admin',
+    canEdit: role === 'admin',
     isLoading,
     refetch: fetchRole,
   };

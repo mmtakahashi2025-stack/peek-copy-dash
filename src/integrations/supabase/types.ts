@@ -263,6 +263,33 @@ export type Database = {
         }
         Relationships: []
       }
+      system_settings: {
+        Row: {
+          created_at: string | null
+          encrypted_value: string | null
+          id: string
+          setting_key: string
+          setting_value: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          encrypted_value?: string | null
+          id?: string
+          setting_key: string
+          setting_value?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          encrypted_value?: string | null
+          id?: string
+          setting_key?: string
+          setting_value?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -298,6 +325,13 @@ export type Database = {
         Returns: string
       }
       get_erp_password: { Args: { target_user_id: string }; Returns: string }
+      get_system_erp_credentials: {
+        Args: never
+        Returns: {
+          email: string
+          password: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -308,6 +342,10 @@ export type Database = {
       is_admin_or_manager: { Args: never; Returns: boolean }
       save_erp_password: {
         Args: { plain_password: string; target_user_id: string }
+        Returns: undefined
+      }
+      save_system_erp_credentials: {
+        Args: { p_email: string; p_password: string }
         Returns: undefined
       }
     }

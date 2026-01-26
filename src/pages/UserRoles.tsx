@@ -20,15 +20,16 @@ interface UserWithRole {
   role: AppRole | null;
 }
 
-const roleLabels: Record<AppRole, string> = {
+const roleLabels: Record<AppRole | 'none', string> = {
   admin: 'Administrador',
-  manager: 'Gerente',
-  employee: 'Colaborador',
+  manager: 'Leitor',
+  employee: 'Leitor',
+  none: 'Sem role',
 };
 
 const roleColors: Record<AppRole, string> = {
   admin: 'bg-destructive text-destructive-foreground',
-  manager: 'bg-warning text-warning-foreground',
+  manager: 'bg-secondary text-secondary-foreground',
   employee: 'bg-secondary text-secondary-foreground',
 };
 
@@ -240,8 +241,7 @@ export default function UserRoles() {
                             <SelectContent>
                               <SelectItem value="none">Sem role</SelectItem>
                               <SelectItem value="admin">Administrador</SelectItem>
-                              <SelectItem value="manager">Gerente</SelectItem>
-                              <SelectItem value="employee">Colaborador</SelectItem>
+                              <SelectItem value="employee">Leitor</SelectItem>
                             </SelectContent>
                           </Select>
                         </TableCell>

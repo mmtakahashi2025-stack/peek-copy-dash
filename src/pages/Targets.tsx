@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useUserRole } from '@/hooks/useUserRole';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -9,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Save, Loader2, Copy, CalendarRange } from 'lucide-react';
+import { Save, Loader2, Copy, CalendarRange, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
@@ -56,6 +57,7 @@ interface KpiTarget {
 
 export default function Targets() {
   const { user, loading: authLoading } = useAuth();
+  const { canEdit, isLoading: isRoleLoading } = useUserRole();
   const navigate = useNavigate();
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
@@ -194,7 +196,7 @@ export default function Targets() {
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
 
-  if (authLoading) {
+  if (authLoading || isRoleLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -275,6 +277,7 @@ export default function Targets() {
                           value={targets[kpi.id] ?? ''}
                           onChange={(e) => handleTargetChange(kpi.id, e.target.value)}
                           className="w-full"
+                          disabled={!canEdit}
                         />
                       </TableCell>
                     </TableRow>
@@ -283,7 +286,15 @@ export default function Targets() {
               </Table>
             )}
 
-            <div className="flex flex-wrap gap-3 justify-between items-start border-t pt-4">
+            {!canEdit && (
+              <div className="flex items-center gap-2 p-3 bg-muted rounded-lg text-sm text-muted-foreground">
+                <Lock className="h-4 w-4" />
+                <span>Apenas administradores podem editar metas</span>
+              </div>
+            )}
+
+            {canEdit && (
+              <div className="flex flex-wrap gap-3 justify-between items-start border-t pt-4">
               <div>
                 <Button
                   variant="outline"
@@ -353,6 +364,7 @@ export default function Targets() {
                 )}
               </Button>
             </div>
+            )}
           </CardContent>
         </Card>
       </main>
