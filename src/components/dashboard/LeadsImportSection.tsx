@@ -4,7 +4,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Progress } from '@/components/ui/progress';
-import { FileSpreadsheet, Upload, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { FileSpreadsheet, Upload, Loader2, CheckCircle, XCircle, Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -30,11 +32,21 @@ const toISODate = (dateStr: string) => {
   return `${year}-${month}-${day}`;
 };
 
-// Month names in Portuguese (uppercase)
+// Month names in Portuguese (uppercase for tabs)
 const MONTHS_PT = [
   'JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO',
   'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO'
 ];
+
+// Month names for display
+const MONTHS_DISPLAY = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
+
+// Generate year options
+const currentYear = new Date().getFullYear();
+const YEAR_OPTIONS = [currentYear - 2, currentYear - 1, currentYear, currentYear + 1];
 
 export function LeadsImportSection() {
   const [sheetUrl, setSheetUrl] = useState('');
@@ -43,6 +55,12 @@ export function LeadsImportSection() {
   const [importAllTabs, setImportAllTabs] = useState(true);
   const [tabPrefix, setTabPrefix] = useState('LEADS');
   const [progress, setProgress] = useState({ current: 0, total: 0, currentTab: '' });
+  
+  // Clear before import options
+  const [clearBeforeImport, setClearBeforeImport] = useState(false);
+  const [clearYear, setClearYear] = useState(currentYear.toString());
+  const [clearMonth, setClearMonth] = useState<string>('all');
+  const [isClearing, setIsClearing] = useState(false);
 
   const processSheetData = (rows: Record<string, unknown>[]): LeadRecord[] => {
     const records: LeadRecord[] = [];
@@ -233,7 +251,55 @@ export function LeadsImportSection() {
     setProgress({ current: 0, total: 0, currentTab: '' });
   };
 
-  const handleImport = () => {
+  const handleClearPeriod = async () => {
+    setIsClearing(true);
+    
+    try {
+      const year = parseInt(clearYear);
+      let startDate: string;
+      let endDate: string;
+      
+      if (clearMonth === 'all') {
+        startDate = `${year}-01-01`;
+        endDate = `${year}-12-31`;
+      } else {
+        const month = parseInt(clearMonth);
+        const lastDay = new Date(year, month, 0).getDate();
+        startDate = `${year}-${month.toString().padStart(2, '0')}-01`;
+        endDate = `${year}-${month.toString().padStart(2, '0')}-${lastDay}`;
+      }
+
+      const { error, count } = await supabase
+        .from('lead_records')
+        .delete()
+        .gte('record_date', startDate)
+        .lte('record_date', endDate);
+
+      if (error) throw error;
+
+      const periodLabel = clearMonth === 'all' 
+        ? `ano ${year}` 
+        : `${MONTHS_DISPLAY[parseInt(clearMonth) - 1]} ${year}`;
+      
+      toast.success(`${count || 0} registros de ${periodLabel} apagados com sucesso!`);
+      
+      // Dispatch event to notify Leads page
+      window.dispatchEvent(new CustomEvent('lead_records_changed'));
+      
+    } catch (error) {
+      console.error('[Leads Clear] Error:', error);
+      toast.error('Erro ao apagar registros');
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  const handleImport = async () => {
+    // Clear period before import if option is enabled
+    if (clearBeforeImport) {
+      await handleClearPeriod();
+    }
+    
     if (importAllTabs) {
       handleImportAllTabs();
     } else {
@@ -297,6 +363,56 @@ export function LeadsImportSection() {
         />
       </div>
 
+      {/* Clear before import option */}
+      <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+        <div className="space-y-0.5">
+          <Label htmlFor="clear-before-import" className="text-sm font-medium">
+            Limpar período antes de importar
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Apaga registros existentes do período selecionado
+          </p>
+        </div>
+        <Switch
+          id="clear-before-import"
+          checked={clearBeforeImport}
+          onCheckedChange={setClearBeforeImport}
+          disabled={isImporting}
+        />
+      </div>
+
+      {clearBeforeImport && (
+        <div className="flex gap-2">
+          <div className="flex-1 space-y-1">
+            <Label className="text-xs">Ano</Label>
+            <Select value={clearYear} onValueChange={setClearYear} disabled={isImporting}>
+              <SelectTrigger className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {YEAR_OPTIONS.map(year => (
+                  <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex-1 space-y-1">
+            <Label className="text-xs">Mês</Label>
+            <Select value={clearMonth} onValueChange={setClearMonth} disabled={isImporting}>
+              <SelectTrigger className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os meses</SelectItem>
+                {MONTHS_DISPLAY.map((month, idx) => (
+                  <SelectItem key={idx} value={(idx + 1).toString()}>{month}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
+
       {isImporting && progress.total > 0 && (
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
@@ -326,6 +442,81 @@ export function LeadsImportSection() {
           </>
         )}
       </Button>
+
+      {/* Standalone clear button */}
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={isClearing || isImporting}
+            className="w-full text-destructive hover:text-destructive"
+          >
+            {isClearing ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Apagando...
+              </>
+            ) : (
+              <>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Apagar Leads do Período
+              </>
+            )}
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apagar registros de leads</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3">
+              <p>
+                Selecione o período que deseja apagar:
+              </p>
+              <div className="flex gap-2">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Ano</Label>
+                  <Select value={clearYear} onValueChange={setClearYear}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {YEAR_OPTIONS.map(year => (
+                        <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Mês</Label>
+                  <Select value={clearMonth} onValueChange={setClearMonth}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos os meses</SelectItem>
+                      {MONTHS_DISPLAY.map((month, idx) => (
+                        <SelectItem key={idx} value={(idx + 1).toString()}>{month}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <p className="text-destructive font-medium">
+                Esta ação não pode ser desfeita!
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleClearPeriod}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Apagar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {importResult && (
         <div className={`p-3 rounded-lg text-sm ${
