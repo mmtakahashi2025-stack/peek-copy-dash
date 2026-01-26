@@ -1,9 +1,69 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.89.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+type SystemSettingsRow = {
+  setting_key: string;
+  setting_value: string | null;
+  encrypted_value: string | null;
+};
+
+async function getSystemErpCredentials(): Promise<{
+  email: string | null;
+  password: string | null;
+  source: 'system_settings' | 'env';
+}> {
+  const fromEnv = () => ({
+    email: Deno.env.get('ERP_API_EMAIL') ?? null,
+    password: Deno.env.get('ERP_API_PASSWORD') ?? null,
+    source: 'env' as const,
+  });
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return fromEnv();
+  }
+
+  try {
+    const admin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false },
+    });
+
+    const { data, error } = await admin
+      .from('system_settings')
+      .select('setting_key, setting_value, encrypted_value')
+      .in('setting_key', ['erp_email', 'erp_password']);
+
+    if (error) throw error;
+
+    const rows = (data ?? []) as SystemSettingsRow[];
+    const emailRow = rows.find((r) => r.setting_key === 'erp_email');
+    const passwordRow = rows.find((r) => r.setting_key === 'erp_password');
+
+    const email = (emailRow?.setting_value ?? '').trim();
+    const encryptedPassword = passwordRow?.encrypted_value ?? null;
+
+    if (email && encryptedPassword) {
+      const { data: decrypted, error: decError } = await admin.rpc('decrypt_erp_password', {
+        encrypted_password: encryptedPassword,
+      });
+
+      if (!decError && typeof decrypted === 'string' && decrypted.trim()) {
+        return { email, password: decrypted, source: 'system_settings' };
+      }
+    }
+  } catch (err) {
+    console.warn('[ERP] Falha ao obter credenciais do sistema, usando fallback env:', err);
+  }
+
+  return fromEnv();
+}
 
 interface SalesRequestBody {
   startDate: string;
@@ -366,15 +426,19 @@ serve(async (req) => {
     endDate = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
   }
 
-  // Use user credentials if provided, otherwise fall back to env
-  const erpEmail = userEmail || Deno.env.get('ERP_API_EMAIL');
-  const erpPassword = userPassword || Deno.env.get('ERP_API_PASSWORD');
+  if (userEmail || userPassword) {
+    console.log('[ERP] Aviso: credenciais enviadas pelo cliente foram ignoradas (usando credenciais do sistema).');
+  }
+
+  const creds = await getSystemErpCredentials();
+  const erpEmail = creds.email;
+  const erpPassword = creds.password;
 
   if (!erpEmail || !erpPassword) {
     return new Response(
       JSON.stringify({ 
         success: false, 
-        error: 'Credenciais do ERP não configuradas. Configure sua senha do ERP nas configurações.',
+        error: 'Credenciais do ERP não configuradas. Configure nas Configurações do Sistema.',
         needsCredentials: true
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -382,7 +446,7 @@ serve(async (req) => {
   }
 
   console.log('[ERP] Buscando vendas de', startDate, 'até', endDate);
-  console.log('[ERP] Usando credenciais do usuário:', userEmail ? 'SIM' : 'NÃO (fallback env)');
+  console.log('[ERP] Origem credenciais:', creds.source);
   console.log('[ERP] Paginação mensal:', usePagination ? 'SIM' : 'NÃO');
 
   try {

@@ -247,25 +247,20 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Use the system-wide credentials function (configured by admin)
-    const { data, error } = await supabase.rpc('get_system_erp_credentials');
+    // IMPORTANT: do not fetch ERP password to the browser.
+    // We only need email + whether a password is configured.
+    const { data: response, error: funcError } = await supabase.functions.invoke('erp-credentials-status');
 
-    if (error) {
-      console.error('Error fetching system ERP credentials:', error);
-      setErpCredentials({
-        email: '',
-        password: null,
-        hasPassword: false,
-      });
+    if (funcError || !response?.success) {
+      console.error('Error fetching system ERP credentials status:', funcError || response?.error);
+      setErpCredentials({ email: '', password: null, hasPassword: false });
       return;
     }
 
-    // The RPC returns a table, get first row
-    const credentials = data?.[0];
     setErpCredentials({
-      email: credentials?.email || '',
-      password: credentials?.password || null,
-      hasPassword: !!credentials?.password,
+      email: response.email || '',
+      password: null,
+      hasPassword: !!response.hasPassword,
     });
   }, []);
 
@@ -526,11 +521,6 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
             usePagination: 'false',
           };
 
-          if (erpCredentials?.email && erpCredentials?.password) {
-            requestBody.email = erpCredentials.email;
-            requestBody.password = erpCredentials.password;
-          }
-
           const { data: response, error: funcError } = await supabase.functions.invoke('fetch-erp-data', {
             body: requestBody
           });
@@ -650,7 +640,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     } else {
       toast.error('Falha ao carregar dados do ERP');
     }
-  }, [erpCredentials, broadcastUpdate, generateMonthlyPeriods, getMonthsToRefresh, getCachedMonths, setMonthData, cancelRequested]);
+  }, [broadcastUpdate, generateMonthlyPeriods, getMonthsToRefresh, getCachedMonths, setMonthData, cancelRequested]);
 
   // Single request loading (for small date ranges)
   const loadErpDataSingle = useCallback(async (startDate: Date, endDate: Date) => {
@@ -659,11 +649,6 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         startDate: formatDateForErp(startDate),
         endDate: formatDateForErp(endDate),
       };
-
-      if (erpCredentials?.email && erpCredentials?.password) {
-        requestBody.email = erpCredentials.email;
-        requestBody.password = erpCredentials.password;
-      }
 
       const { data: response, error: funcError } = await supabase.functions.invoke('fetch-erp-data', {
         body: requestBody
@@ -729,7 +714,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [erpCredentials, broadcastUpdate, setCachedData]);
+  }, [broadcastUpdate, setCachedData]);
 
   const loadErpData = useCallback(async (dateFrom?: Date, dateTo?: Date, forceRefresh = false) => {
     const now = new Date();
