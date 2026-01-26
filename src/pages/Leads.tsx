@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useUserRole } from '@/hooks/useUserRole';
 import { useSheetData } from '@/contexts/SheetDataContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -12,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isWithinInterval, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Loader2, CalendarIcon, Users, ChevronUp, ChevronDown, TrendingDown, Minus, ArrowDownRight, ArrowUpRight } from 'lucide-react';
+import { Loader2, CalendarIcon, Users, ChevronUp, ChevronDown, TrendingDown, Minus, ArrowDownRight, ArrowUpRight, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 
@@ -40,6 +41,7 @@ const MONTHS = [
 
 export default function Leads() {
   const { user, loading: authLoading } = useAuth();
+  const { canEdit, isLoading: isRoleLoading } = useUserRole();
   const { colaboradores } = useSheetData();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('grid');
@@ -321,7 +323,7 @@ export default function Leads() {
     return [currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
   }, []);
 
-  if (authLoading) {
+  if (authLoading || isRoleLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -468,9 +470,9 @@ export default function Leads() {
                                   key={dateStr}
                                   className={cn(
                                     'text-center p-1 h-12',
-                                    value >= 15 && 'bg-green-500/20',
-                                    value >= 10 && value < 15 && 'bg-yellow-500/20',
-                                    value > 0 && value < 10 && 'bg-orange-500/20'
+                                    value >= 15 && 'bg-success/20',
+                                    value >= 10 && value < 15 && 'bg-warning/20',
+                                    value > 0 && value < 10 && 'bg-destructive/20'
                                   )}
                                 >
                                   <input
@@ -482,13 +484,13 @@ export default function Leads() {
                                       const newValue = Math.max(0, parseInt(e.target.value) || 0);
                                       saveRecord(row.collaborator as string, dateStr, newValue);
                                     }}
-                                    disabled={isSaving}
+                                    disabled={isSaving || !canEdit}
                                     className={cn(
                                       'w-full h-8 text-center text-sm font-medium bg-transparent border border-border/50 rounded focus:outline-none focus:ring-1 focus:ring-primary',
-                                      value >= 15 && 'text-green-700 dark:text-green-400',
-                                      value >= 10 && value < 15 && 'text-yellow-700 dark:text-yellow-400',
-                                      value > 0 && value < 10 && 'text-orange-700 dark:text-orange-400',
-                                      isSaving && 'opacity-50'
+                                      value >= 15 && 'text-success',
+                                      value >= 10 && value < 15 && 'text-warning',
+                                      value > 0 && value < 10 && 'text-destructive',
+                                      (isSaving || !canEdit) && 'opacity-50 cursor-not-allowed'
                                     )}
                                     placeholder="-"
                                   />
@@ -518,7 +520,11 @@ export default function Leads() {
                                     const newValue = Math.max(0, parseInt(e.target.value) || 0);
                                     setTotalRecebido(prev => ({ ...prev, [dateStr]: newValue }));
                                   }}
-                                  className="w-full h-8 text-center text-sm font-medium bg-transparent border border-border/50 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                                  disabled={!canEdit}
+                                  className={cn(
+                                    'w-full h-8 text-center text-sm font-medium bg-transparent border border-border/50 rounded focus:outline-none focus:ring-1 focus:ring-primary',
+                                    !canEdit && 'opacity-50 cursor-not-allowed'
+                                  )}
                                   placeholder="-"
                                 />
                               </TableCell>
@@ -572,18 +578,18 @@ export default function Leads() {
                         key={item.name}
                         className={cn(
                           'flex items-center justify-between p-3 rounded-lg',
-                          index === 0 && 'bg-yellow-500/20',
-                          index === 1 && 'bg-gray-400/20',
-                          index === 2 && 'bg-orange-400/20',
+                          index === 0 && 'bg-warning/20',
+                          index === 1 && 'bg-secondary/50',
+                          index === 2 && 'bg-accent/30',
                           index > 2 && 'bg-muted/30'
                         )}
                       >
                         <div className="flex items-center gap-3">
                           <span className={cn(
                             'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold',
-                            index === 0 && 'bg-yellow-500 text-yellow-950',
-                            index === 1 && 'bg-gray-400 text-gray-950',
-                            index === 2 && 'bg-orange-400 text-orange-950',
+                            index === 0 && 'bg-warning text-warning-foreground',
+                            index === 1 && 'bg-secondary text-secondary-foreground',
+                            index === 2 && 'bg-accent text-accent-foreground',
                             index > 2 && 'bg-muted text-muted-foreground'
                           )}>
                             {index + 1}

@@ -239,7 +239,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     monthsToRefresh: MONTHS_TO_REFRESH_CONFIG,
   } = useErpCache();
 
-  // Fetch ERP credentials from profile using secure RPC function
+  // Fetch system-wide ERP credentials (configured by admin)
   const refreshErpCredentials = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -247,25 +247,25 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Use the secure RPC function to get decrypted password
-    const { data: decryptedPassword, error } = await supabase.rpc('get_erp_password', {
-      target_user_id: user.id
-    });
+    // Use the system-wide credentials function (configured by admin)
+    const { data, error } = await supabase.rpc('get_system_erp_credentials');
 
     if (error) {
-      console.error('Error fetching ERP credentials:', error);
+      console.error('Error fetching system ERP credentials:', error);
       setErpCredentials({
-        email: user.email || '',
+        email: '',
         password: null,
         hasPassword: false,
       });
       return;
     }
 
+    // The RPC returns a table, get first row
+    const credentials = data?.[0];
     setErpCredentials({
-      email: user.email || '',
-      password: decryptedPassword || null,
-      hasPassword: !!decryptedPassword,
+      email: credentials?.email || '',
+      password: credentials?.password || null,
+      hasPassword: !!credentials?.password,
     });
   }, []);
 

@@ -5,6 +5,7 @@ import { LogOut, Target, Award, Users, Menu, LayoutDashboard, UserCog } from 'lu
 import { Link, useLocation } from 'react-router-dom';
 import comboLogo from '@/assets/combo-iguassu-logo.png';
 import { SheetConfigDialog } from './SheetConfigDialog';
+import { SystemSettingsDialog } from './SystemSettingsDialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { useState } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -55,27 +56,30 @@ export function DashboardHeader() {
               </Button>
             );
           })}
-          {isAdmin && (
-            <Button
-              variant={location.pathname === '/usuarios' ? 'secondary' : 'ghost'}
-              size="sm"
-              asChild
-              className="gap-2"
-            >
-              <Link to="/usuarios">
-                <UserCog className="h-4 w-4" />
-                Usuários
-              </Link>
+            {isAdmin && (
+              <>
+                <Button
+                  variant={location.pathname === '/usuarios' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  asChild
+                  className="gap-2"
+                >
+                  <Link to="/usuarios">
+                    <UserCog className="h-4 w-4" />
+                    Usuários
+                  </Link>
+                </Button>
+                <SystemSettingsDialog />
+              </>
+            )}
+            <SheetConfigDialog />
+            <span className="text-sm text-muted-foreground">
+              {user?.email}
+            </span>
+            <Button variant="ghost" size="sm" onClick={signOut} className="gap-2">
+              <LogOut className="h-4 w-4" />
+              Sair
             </Button>
-          )}
-          <SheetConfigDialog />
-          <span className="text-sm text-muted-foreground">
-            {user?.email}
-          </span>
-          <Button variant="ghost" size="sm" onClick={signOut} className="gap-2">
-            <LogOut className="h-4 w-4" />
-            Sair
-          </Button>
         </div>
 
         {/* Mobile Menu */}
@@ -110,17 +114,20 @@ export function DashboardHeader() {
                 })}
                 
                 {isAdmin && (
-                  <Button
-                    variant={location.pathname === '/usuarios' ? 'secondary' : 'ghost'}
-                    className="justify-start gap-3 h-12"
-                    asChild
-                    onClick={handleNavigate}
-                  >
-                    <Link to="/usuarios">
-                      <UserCog className="h-5 w-5" />
-                      Usuários
-                    </Link>
-                  </Button>
+                  <>
+                    <Button
+                      variant={location.pathname === '/usuarios' ? 'secondary' : 'ghost'}
+                      className="justify-start gap-3 h-12"
+                      asChild
+                      onClick={handleNavigate}
+                    >
+                      <Link to="/usuarios">
+                        <UserCog className="h-5 w-5" />
+                        Usuários
+                      </Link>
+                    </Button>
+                    <SystemSettingsDialog triggerClassName="justify-start gap-3 h-12 w-full" />
+                  </>
                 )}
                 
                 <div className="border-t my-4" />

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useUserRole } from '@/hooks/useUserRole';
 import { useSheetData } from '@/contexts/SheetDataContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -16,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO, isWithinInterval } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Plus, Trash2, Loader2, Save, Edit2, CalendarIcon, CheckCircle2, XCircle, MinusCircle, ClipboardCheck, Printer } from 'lucide-react';
+import { Plus, Trash2, Loader2, Save, Edit2, CalendarIcon, CheckCircle2, XCircle, MinusCircle, ClipboardCheck, Printer, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
@@ -60,6 +61,7 @@ const MONTHS = [
 
 export default function ExcellenceStandard() {
   const { user, loading: authLoading } = useAuth();
+  const { canEdit, isLoading: isRoleLoading } = useUserRole();
   const { colaboradores } = useSheetData();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('grid');
@@ -846,9 +848,9 @@ export default function ExcellenceStandard() {
                         <div key={collab.name} className="flex items-center gap-3">
                           <span className={cn(
                             "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold",
-                            index === 0 ? "bg-yellow-500 text-yellow-950" :
-                            index === 1 ? "bg-gray-400 text-gray-950" :
-                            index === 2 ? "bg-orange-400 text-orange-950" :
+                            index === 0 ? "bg-warning text-warning-foreground" :
+                            index === 1 ? "bg-secondary text-secondary-foreground" :
+                            index === 2 ? "bg-accent text-accent-foreground" :
                             "bg-muted text-muted-foreground"
                           )}>
                             {index + 1}
@@ -1014,8 +1016,10 @@ export default function ExcellenceStandard() {
                                       >
                                         {evaluation ? (
                                           getEvaluationDisplay(evaluation)
-                                        ) : (
+                                        ) : canEdit ? (
                                           <Plus className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 hover:opacity-100" />
+                                        ) : (
+                                          <span className="text-xs text-muted-foreground">-</span>
                                         )}
                                       </Button>
                                     </PopoverTrigger>
@@ -1028,7 +1032,7 @@ export default function ExcellenceStandard() {
                                               {format(day, "dd 'de' MMMM", { locale: ptBR })}
                                             </p>
                                           </div>
-                                          {evaluation && (
+                                          {evaluation && canEdit && (
                                             <Button
                                               variant="ghost"
                                               size="icon"
@@ -1039,6 +1043,13 @@ export default function ExcellenceStandard() {
                                             </Button>
                                           )}
                                         </div>
+                                        
+                                        {!canEdit && (
+                                          <div className="flex items-center gap-1 text-xs text-muted-foreground py-2">
+                                            <Lock className="h-3 w-3" />
+                                            <span>Somente leitura</span>
+                                          </div>
+                                        )}
                                         
                                         <div className="space-y-1">
                                           <Label className="text-xs">Nº Conversa</Label>
@@ -1218,14 +1229,16 @@ export default function ExcellenceStandard() {
                               >
                                 <Printer className="h-4 w-4" />
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDeleteEvaluation(evaluation.id)}
-                                title="Excluir"
-                              >
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
+                              {canEdit && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleDeleteEvaluation(evaluation.id)}
+                                  title="Excluir"
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -1248,12 +1261,14 @@ export default function ExcellenceStandard() {
                     setNewCriterion({ code: '', description: '' });
                   }
                 }}>
-                  <DialogTrigger asChild>
-                    <Button size="sm" className="gap-2">
-                      <Plus className="h-4 w-4" />
-                      Novo Critério
-                    </Button>
-                  </DialogTrigger>
+                  {canEdit && (
+                    <DialogTrigger asChild>
+                      <Button size="sm" className="gap-2">
+                        <Plus className="h-4 w-4" />
+                        Novo Critério
+                      </Button>
+                    </DialogTrigger>
+                  )}
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>
@@ -1319,22 +1334,26 @@ export default function ExcellenceStandard() {
                           <TableCell className="font-medium">{criterion.code}</TableCell>
                           <TableCell>{criterion.description}</TableCell>
                           <TableCell>
-                            <div className="flex gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => openEditCriterion(criterion)}
-                              >
-                                <Edit2 className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDeleteCriterion(criterion.id)}
-                              >
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
-                            </div>
+                            {canEdit ? (
+                              <div className="flex gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => openEditCriterion(criterion)}
+                                >
+                                  <Edit2 className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleDeleteCriterion(criterion.id)}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}

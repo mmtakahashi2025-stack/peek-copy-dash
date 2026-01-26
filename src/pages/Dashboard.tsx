@@ -5,11 +5,12 @@ import { KPICard, KPICardSkeleton } from '@/components/dashboard/KPICard';
 import { RankingCard } from '@/components/dashboard/RankingCard';
 import { ProductRankingCard } from '@/components/dashboard/ProductRankingCard';
 import { SalesEvolutionChart } from '@/components/dashboard/SalesEvolutionChart';
-import { ErpPasswordDialog } from '@/components/dashboard/ErpPasswordDialog';
 import { LoadingProgress } from '@/components/dashboard/LoadingProgress';
 import { useSheetData, KpiData } from '@/contexts/SheetDataContext';
-import { KeyRound } from 'lucide-react';
+import { useUserRole } from '@/hooks/useUserRole';
+import { KeyRound, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { SystemSettingsDialog } from '@/components/dashboard/SystemSettingsDialog';
 
 interface Filters {
   dateFrom: Date | undefined;
@@ -25,8 +26,8 @@ interface Filters {
 
 export default function Dashboard() {
   const { rawData, isLoading, isConnected, getKpis, getColaboradores, getProdutos, fetchExcellencePercentage, fetchLeadsTotal, loadErpData, cancelLoading, erpCredentials, refreshErpCredentials, loadingProgress } = useSheetData();
+  const { isAdmin } = useUserRole();
   
-  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [filters, setFilters] = useState<Filters>({
     dateFrom: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     dateTo: new Date(),
@@ -136,33 +137,23 @@ export default function Dashboard() {
         <DashboardFilters onFiltersChange={handleFiltersChange} />
         
 
-        {/* ERP Password Warning */}
+        {/* ERP Not Configured Warning */}
         {!erpCredentials?.hasPassword && !isLoading && (
-          <div className="flex items-center gap-3 p-4 bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 rounded-xl">
+          <div className="flex items-center gap-3 p-4 bg-warning/10 border border-warning/30 text-warning-foreground rounded-xl">
             <KeyRound className="h-5 w-5 flex-shrink-0" />
             <div className="flex-1">
-              <p className="font-medium">Configure sua senha do ERP</p>
+              <p className="font-medium">Conexão com ERP não configurada</p>
               <p className="text-sm opacity-80">
-                Para carregar os dados de vendas, você precisa configurar sua senha do ERP.
+                {isAdmin 
+                  ? 'Configure as credenciais do ERP nas configurações do sistema para carregar dados de vendas.'
+                  : 'O administrador precisa configurar as credenciais do ERP para exibir dados de vendas.'}
               </p>
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setShowPasswordDialog(true)}
-            >
-              Configurar Senha
-            </Button>
+            {isAdmin && (
+              <SystemSettingsDialog triggerClassName="gap-2" />
+            )}
           </div>
         )}
-
-
-        {/* ERP Password Dialog */}
-        <ErpPasswordDialog 
-          open={showPasswordDialog} 
-          onOpenChange={setShowPasswordDialog}
-          onSaved={refreshErpCredentials}
-        />
 
         {/* Loading Progress Indicator */}
         <LoadingProgress progress={loadingProgress} onCancel={cancelLoading} />
