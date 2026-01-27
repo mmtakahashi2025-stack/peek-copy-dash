@@ -115,7 +115,7 @@ export function SalesEvolutionChart({
     return Array.from({ length: 6 }, (_, i) => currentYear - 5 + i);
   }, []);
 
-  // Load yearly data when user is authenticated and selected year changes
+  // Load yearly data when user is authenticated and selected years change
   useEffect(() => {
     // Don't load if auth is still loading
     if (authLoading) {
@@ -129,7 +129,14 @@ export function SalesEvolutionChart({
       return;
     }
     
-    const yearsKey = `${selectedYearForAnnual}-${selectedYearForAnnual - 1}`;
+    // Include years from both annual and monthly selectors
+    const yearsSet = new Set([
+      selectedYearForAnnual,
+      selectedYearForAnnual - 1,
+      selectedYear,  // Year from monthly chart
+    ]);
+    const yearsToLoad = Array.from(yearsSet).sort((a, b) => b - a);
+    const yearsKey = yearsToLoad.join('-');
     
     // Avoid reloading same years if we already have data
     if (loadedYearsRef.current === yearsKey && yearlyRawData.length > 0) {
@@ -138,10 +145,9 @@ export function SalesEvolutionChart({
     }
     
     console.log('[SalesEvolution] Loading years:', yearsKey);
-    const yearsToLoad = [selectedYearForAnnual, selectedYearForAnnual - 1];
     loadYearlyData(yearsToLoad);
     loadedYearsRef.current = yearsKey;
-  }, [selectedYearForAnnual, loadYearlyData, user, authLoading, yearlyRawData.length]);
+  }, [selectedYearForAnnual, selectedYear, loadYearlyData, user, authLoading, yearlyRawData.length]);
   
   // Retry logic: if data is still empty after auth is ready, retry once after a delay
   useEffect(() => {
@@ -204,11 +210,11 @@ export function SalesEvolutionChart({
     });
   }, [yearlyRawData, filialId, selectedYearForAnnual]);
 
-  // Faturamento mensal (por dias) - usa mês/ano selecionado
+  // Faturamento mensal (por dias) - uses yearlyRawData for full cache access
   const dailyData = useMemo(() => {
     const filialFiltered = filialId === 'todas' 
-      ? rawData 
-      : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
+      ? yearlyRawData 
+      : yearlyRawData.filter(r => normalizeFilialId(r.Filial) === filialId);
 
     const targetYear = selectedYear;
     const targetMonth = selectedMonth;
@@ -234,7 +240,7 @@ export function SalesEvolutionChart({
       dia: String(i + 1).padStart(2, '0'),
       faturamento: Math.round(dailyFaturamento[i + 1] || 0),
     }));
-  }, [rawData, filialId, selectedMonth, selectedYear]);
+  }, [yearlyRawData, filialId, selectedMonth, selectedYear]);
 
   const hasYearlyData = yearlyComparisonData.some(d => d.faturamento > 0 || d.faturamentoAnterior > 0);
   const hasPreviousYearData = yearlyComparisonData.some(d => d.faturamentoAnterior > 0);
@@ -372,13 +378,17 @@ export function SalesEvolutionChart({
             
             {/* Gráfico de barras diárias */}
             <div className="h-[220px]">
-              {!hasDailyData ? (
+              {isLoadingYearly ? (
+                <div className="h-full flex flex-col gap-2 p-4">
+                  <Skeleton className="h-full w-full" />
+                </div>
+              ) : !hasDailyData ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground">
-                  {rawData.length === 0 
-                    ? 'Carregue dados para visualizar o gráfico'
+                  {yearlyRawData.length === 0 
+                    ? 'Carregando dados...'
                     : `Nenhum dado encontrado para ${mesesCompletos[selectedMonth]}/${selectedYear}`}
                 </div>
-              ) : (
+              ) : hasDailyData ? (
                 <ChartContainer config={chartConfig} className="h-full w-full">
                   <BarChart data={dailyData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
@@ -411,7 +421,7 @@ export function SalesEvolutionChart({
                     />
                   </BarChart>
                 </ChartContainer>
-              )}
+              ) : null}
             </div>
           </TabsContent>
         </Tabs>

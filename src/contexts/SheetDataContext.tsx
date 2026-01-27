@@ -199,6 +199,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   const [rawData, setRawData] = useState<RawSaleRow[]>([]);
   const [yearlyRawData, setYearlyRawData] = useState<RawSaleRow[]>([]);
   const [isLoadingYearly, setIsLoadingYearly] = useState(false);
+  const [loadedYears, setLoadedYears] = useState<Set<number>>(new Set());
   const [kpiTargets, setKpiTargets] = useState<KpiTarget[]>([]);
   const [excellencePercentage, setExcellencePercentage] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -248,6 +249,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   } = useErpCache();
 
   // Load yearly data for the evolution chart (independent of dashboard filters)
+  // Uses parallel loading and intelligent caching to avoid duplicate fetches
   const loadYearlyData = useCallback(async (years: number[]) => {
     if (years.length === 0) return;
     
@@ -258,28 +260,60 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       return;
     }
     
+    // Filter only years that haven't been loaded yet
+    const newYears = years.filter(y => !loadedYears.has(y));
+    
+    if (newYears.length === 0) {
+      console.log('[YearlyData] All years already loaded:', years.join(', '));
+      return;
+    }
+    
+    console.log('[YearlyData] Loading new years:', newYears.join(', '), '| Already loaded:', Array.from(loadedYears).join(', '));
     setIsLoadingYearly(true);
-    const allData: RawSaleRow[] = [];
     
     try {
-      for (const year of years) {
+      // Generate list of all months to fetch for new years only
+      const monthsToFetch: { year: number; month: number }[] = [];
+      for (const year of newYears) {
         for (let month = 1; month <= 12; month++) {
-          const monthData = await getMonthData(year, month);
-          if (monthData) {
-            allData.push(...monthData);
-            console.log(`[YearlyData] Loaded ${year}-${month}: ${monthData.length} records`);
-          }
+          monthsToFetch.push({ year, month });
         }
       }
       
-      setYearlyRawData(allData);
-      console.log(`[YearlyData] Total: ${allData.length} records for years: ${years.join(', ')}`);
+      // Fetch all months in PARALLEL (much faster than sequential)
+      const results = await Promise.all(
+        monthsToFetch.map(async ({ year, month }) => {
+          const data = await getMonthData(year, month);
+          if (data) {
+            console.log(`[YearlyData] Loaded ${year}-${month}: ${data.length} records`);
+          }
+          return data || [];
+        })
+      );
+      
+      // Combine all results
+      const newData = results.flat();
+      
+      // Merge with existing data, removing duplicates by sale ID + date
+      setYearlyRawData(prev => {
+        const combined = [...prev, ...newData];
+        const unique = Array.from(
+          new Map(combined.map(r => [`${r['Venda #']}-${r['Data Venda']}`, r])).values()
+        );
+        console.log(`[YearlyData] Merged: ${prev.length} existing + ${newData.length} new = ${unique.length} unique records`);
+        return unique;
+      });
+      
+      // Mark years as loaded
+      setLoadedYears(prev => new Set([...prev, ...newYears]));
+      
+      console.log(`[YearlyData] Loaded ${newData.length} records for new years: ${newYears.join(', ')}`);
     } catch (error) {
       console.error('[YearlyData] Error loading yearly data:', error);
     } finally {
       setIsLoadingYearly(false);
     }
-  }, [getMonthData]);
+  }, [getMonthData, loadedYears]);
 
   // Fetch system-wide ERP credentials (configured by admin)
   const refreshErpCredentials = useCallback(async () => {
