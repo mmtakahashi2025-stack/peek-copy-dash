@@ -1,120 +1,232 @@
 
-# Plano: Adicionar Icones de Crescimento/Queda no Tooltip
+# Plano: Otimizar Cache Local IndexedDB
 
-## Objetivo
+## Problema Identificado
 
-Adicionar indicadores visuais (setas) no tooltip do grafico de evolucao de vendas para mostrar se houve crescimento ou queda comparando o ano atual com o ano anterior.
+O cache local do IndexedDB esta armazenando dados brutos completos de todos os meses (37 meses atualmente), resultando em um tamanho estimado de 70-100 MB por navegador.
 
 ---
 
-## Visualizacao Esperada
+## Solucao Recomendada: Abordagem Hibrida
+
+Combinar 3 estrategias para reducao maxima:
+
+### 1. Limite de Periodo no Cache Local
+
+Manter apenas os ultimos 12 meses no IndexedDB local. Meses mais antigos serao carregados do Supabase quando necessario.
 
 ```text
-+------------------------+
-|  Nov                   |
-|  ▲ R$ 2.696.870,00     |  <- Verde com seta para cima (atual maior)
-|    R$ 2.995.307,00     |  <- Cinza (ano anterior)
-|  +12,4%                |  <- Percentual de variacao
-+------------------------+
+ANTES (37 meses):
+[Jan/23] [Fev/23] ... [Dez/25] = ~95 MB
 
-OU
-
-+------------------------+
-|  Mar                   |
-|  ▼ R$ 1.800.000,00     |  <- Vermelho com seta para baixo (atual menor)
-|    R$ 2.100.000,00     |
-|  -14,3%                |
-+------------------------+
+DEPOIS (12 meses):
+[Fev/25] [Mar/25] ... [Jan/26] = ~26 MB
+                                 (-73%)
 ```
 
----
+### 2. Limpeza Automatica de Meses Antigos
 
-## Mudanca Tecnica
+Quando um novo mes for salvo, remover automaticamente meses que excedam o limite.
 
-### Arquivo: `src/components/dashboard/SalesEvolutionChart.tsx`
+```typescript
+// Nova constante em indexeddb.ts
+const MAX_LOCAL_MONTHS = 12;
 
-Substituir o `ChartTooltipContent` padrao por um tooltip customizado que:
-
-1. Acessa os valores `faturamento` (atual) e `faturamentoAnterior` do payload
-2. Calcula a variacao percentual: `((atual - anterior) / anterior) * 100`
-3. Exibe icone apropriado:
-   - **TrendingUp** (verde) se atual > anterior
-   - **TrendingDown** (vermelho) se atual < anterior
-   - **Minus** (neutro) se igual
-
-### Codigo do Tooltip Customizado:
-
-```tsx
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
-
-// Custom tooltip content component
-const CustomTooltipContent = ({ active, payload, label }: any) => {
-  if (!active || !payload || payload.length < 2) return null;
+// Nova funcao
+export async function pruneOldLocalMonths(maxMonths: number) {
+  const allMonths = await getAllLocalMonths();
+  if (allMonths.length <= maxMonths) return;
   
-  const atual = payload.find((p: any) => p.dataKey === 'faturamento')?.value || 0;
-  const anterior = payload.find((p: any) => p.dataKey === 'faturamentoAnterior')?.value || 0;
+  // Ordenar por data (mais recente primeiro)
+  allMonths.sort((a, b) => b.key.localeCompare(a.key));
   
-  const variacao = anterior > 0 ? ((atual - anterior) / anterior) * 100 : 0;
-  const isGrowth = atual > anterior;
-  const isDecline = atual < anterior;
-  
-  return (
-    <div className="bg-background border rounded-lg p-2 shadow-lg">
-      <p className="font-medium mb-1">{label}</p>
-      <div className="flex items-center gap-1">
-        {isGrowth && <TrendingUp className="h-3 w-3 text-green-500" />}
-        {isDecline && <TrendingDown className="h-3 w-3 text-red-500" />}
-        {!isGrowth && !isDecline && <Minus className="h-3 w-3 text-muted-foreground" />}
-        <span className={isGrowth ? 'text-green-500' : isDecline ? 'text-red-500' : ''}>
-          {formatCurrencyFull(atual)}
-        </span>
-      </div>
-      <p className="text-muted-foreground text-sm">
-        {formatCurrencyFull(anterior)}
-      </p>
-      {anterior > 0 && (
-        <p className={`text-xs font-medium ${isGrowth ? 'text-green-500' : isDecline ? 'text-red-500' : 'text-muted-foreground'}`}>
-          {isGrowth ? '+' : ''}{variacao.toFixed(1)}%
-        </p>
-      )}
-    </div>
-  );
-};
+  // Deletar meses excedentes
+  for (let i = maxMonths; i < allMonths.length; i++) {
+    const [year, month] = allMonths[i].key.split('-').map(Number);
+    await deleteLocalMonthData(year, month);
+  }
+}
 ```
 
-### Uso no BarChart:
+### 3. Configuracao de Retencao pelo Usuario
 
-```tsx
-<ChartTooltip 
-  content={<CustomTooltipContent />}
-/>
+Adicionar opcao nas configuracoes para o usuario escolher:
+
+```text
++------------------------------------------+
+| Cache Local                              |
+|                                          |
+| Manter dados dos ultimos:                |
+|  [6 meses]  [12 meses]  [24 meses]       |
+|                                          |
+| Tamanho atual: 26 MB (12 meses)          |
+| [Limpar Cache Local]                     |
++------------------------------------------+
 ```
 
 ---
 
 ## Arquivos a Modificar
 
-| Arquivo | Mudanca |
-|---------|---------|
-| `src/components/dashboard/SalesEvolutionChart.tsx` | Adicionar componente `CustomTooltipContent` e usar no `ChartTooltip` da aba anual |
+### 1. `src/lib/indexeddb.ts`
+
+| Mudanca | Descricao |
+|---------|-----------|
+| Adicionar `MAX_LOCAL_MONTHS` | Constante para limite padrao (12) |
+| Adicionar `pruneOldLocalMonths()` | Funcao para limpar meses antigos |
+| Modificar `setLocalMonthData()` | Chamar prune apos salvar novo mes |
+
+### 2. `src/hooks/useErpCache.ts`
+
+| Mudanca | Descricao |
+|---------|-----------|
+| Integrar limpeza automatica | Chamar prune apos salvar dados |
+| Expor funcao de config | Para UI de configuracoes |
+
+### 3. `src/components/dashboard/CacheInfoButton.tsx`
+
+| Mudanca | Descricao |
+|---------|-----------|
+| Mostrar tamanho real | Exibir MB usado no IndexedDB |
+| Adicionar seletor de retencao | Dropdown 6/12/24 meses |
+| Botao limpar cache local | Separado do cache Supabase |
 
 ---
 
-## Detalhes da Implementacao
+## Detalhes Tecnicos
 
-1. **Import** dos icones Lucide: `TrendingUp`, `TrendingDown`, `Minus`
-2. **Criar** componente `CustomTooltipContent` antes do componente principal
-3. **Substituir** `<ChartTooltipContent />` por `<CustomTooltipContent />` na aba "anual"
-4. **Manter** tooltip padrao nas abas "semana" e "mes" (nao tem comparativo)
+### Nova Funcao: Limpar Meses Antigos
+
+```typescript
+// src/lib/indexeddb.ts
+
+const DEFAULT_MAX_LOCAL_MONTHS = 12;
+
+export async function pruneOldLocalMonths(
+  maxMonths: number = DEFAULT_MAX_LOCAL_MONTHS
+): Promise<number> {
+  const allMonths = await getAllLocalMonths();
+  
+  if (allMonths.length <= maxMonths) {
+    return 0; // Nada a fazer
+  }
+  
+  // Ordenar por chave (mais recente primeiro: 2026-01 > 2025-12)
+  const sorted = allMonths.sort((a, b) => 
+    b.key.localeCompare(a.key)
+  );
+  
+  let deletedCount = 0;
+  
+  // Manter apenas os N mais recentes
+  for (let i = maxMonths; i < sorted.length; i++) {
+    const [year, month] = sorted[i].key.split('-').map(Number);
+    const success = await deleteLocalMonthData(year, month);
+    if (success) deletedCount++;
+  }
+  
+  console.log(`[IndexedDB] Pruned ${deletedCount} old months, kept ${maxMonths}`);
+  return deletedCount;
+}
+```
+
+### Integracao no Save
+
+```typescript
+// Em useErpCache.ts - modificar setMonthData
+
+const setMonthData = useCallback(async (...) => {
+  // ... save to Supabase ...
+  
+  if (isIndexedDBAvailable()) {
+    await setLocalMonthData(year, month, data);
+    
+    // Limpar meses antigos automaticamente
+    const { pruneOldLocalMonths } = await import('@/lib/indexeddb');
+    await pruneOldLocalMonths(12); // Manter ultimos 12 meses
+    
+    // Atualizar stats
+    const stats = await getLocalCacheStats();
+    setLocalCacheStats({...});
+  }
+  // ...
+});
+```
+
+### UI de Configuracao
+
+```tsx
+// Em CacheInfoButton.tsx - adicionar secao
+
+<div className="space-y-2">
+  <Label>Manter dados locais dos ultimos:</Label>
+  <Select 
+    value={localRetention} 
+    onValueChange={handleRetentionChange}
+  >
+    <SelectItem value="6">6 meses (~13 MB)</SelectItem>
+    <SelectItem value="12">12 meses (~26 MB)</SelectItem>
+    <SelectItem value="24">24 meses (~52 MB)</SelectItem>
+  </Select>
+</div>
+```
 
 ---
 
-## Resultado Final
+## Economia de Espaco Esperada
 
-O tooltip mostrara:
-- Nome do mes (Jan, Fev, etc.)
-- Valor atual com icone de tendencia (▲ verde ou ▼ vermelho)
-- Valor do ano anterior (cinza)
-- Percentual de variacao (+X% ou -X%)
+| Configuracao | Meses | Registros | Tamanho Estimado |
+|--------------|-------|-----------|------------------|
+| 6 meses | 6 | ~35.000 | ~13 MB |
+| 12 meses (padrao) | 12 | ~68.000 | ~26 MB |
+| 24 meses | 24 | ~136.000 | ~52 MB |
+| Sem limite | 37+ | ~200.000+ | ~95 MB+ |
 
-Isso proporcionara uma visualizacao clara e imediata do desempenho comparativo.
+**Reducao com 12 meses: -73% comparado a manter tudo**
+
+---
+
+## Fluxo de Funcionamento
+
+```text
+Usuario abre o dashboard
+         |
+         v
+[Carregar do IndexedDB] <-- Ultimos 12 meses (instantaneo)
+         |
+         v
+Usuario seleciona periodo antigo (ex: Jan/2023)
+         |
+         v
+[Nao esta no IndexedDB local]
+         |
+         v
+[Buscar do Supabase] --> Exibir dados
+         |
+         v
+[NAO salvar no IndexedDB] <-- Evita acumulo
+```
+
+Dados antigos ficam apenas no Supabase e sao buscados sob demanda, sem poluir o cache local.
+
+---
+
+## Resultado Visual
+
+```text
++------------------------------------------+
+| Cache de Dados                           |
++------------------------------------------+
+| ⚡ Cache Local (Instantaneo)             |
+|   Meses: 12  |  Registros: 68.420        |
+|   Tamanho: 26.3 MB                       |
+|                                          |
+|   Manter ultimos: [12 meses v]           |
+|                                          |
+|   [Limpar Cache Local]                   |
++------------------------------------------+
+| 🗄️ Cache Supabase (Sincronizado)         |
+|   Meses: 37  |  Tamanho: 12.2 MB         |
++------------------------------------------+
+```
+
