@@ -1,41 +1,49 @@
 
-# Plano: Corrigir Gráfico de Evolução de Vendas - Comparativo Anual
+# Plano Completo: Corrigir Carregamento de Dados Anuais do Gráfico
 
-## Problema Identificado
+## Problema Identificado (Causa Raiz)
 
-O gráfico de **Evolução de Vendas** mostra "Dados de 2025 não disponíveis para comparação" mesmo tendo todos os meses de 2025 no banco de dados.
+O gráfico mostra "Dados não disponíveis" porque existe uma **condição de corrida** (race condition):
 
-### Causa Raiz
-O `rawData` usado pelo gráfico só contém os dados do **período filtrado no Dashboard** (por padrão: último mês completo = Dezembro/2025).
-
-Quando o usuário seleciona 2026 no gráfico e tenta comparar com 2025, o `rawData` só tem Dezembro/2025, então os outros 11 meses aparecem zerados, acionando a mensagem de "dados não disponíveis".
-
-### Fluxo Atual (Problemático)
+### Sequência Problemática:
 ```text
-Dashboard: filtro = Dez/2025
-    ↓
-loadErpData(Dez/2025)
-    ↓
-rawData = [apenas registros de Dez/2025]
-    ↓
-SalesEvolutionChart usa rawData
-    ↓
-Gráfico 2026 vs 2025: só encontra dados de Dez/2025
-    ↓
-"Dados de 2025 não disponíveis"
+1. SalesEvolutionChart monta
+2. useEffect dispara loadYearlyData([2025, 2024])
+3. loadYearlyData chama getMonthData(2025, 1), getMonthData(2025, 2), ...
+4. getMonthData chama loadMonthFromCache(year, month)
+5. loadMonthFromCache verifica: if (!user) return null  ← PROBLEMA!
+6. O user ainda não foi carregado (está null ou undefined)
+7. Todos os meses retornam null
+8. yearlyRawData = [] (vazio)
+9. Gráfico mostra "Dados não disponíveis"
+```
+
+### Evidência no Código:
+
+**useErpCache.ts - linha 113-114:**
+```tsx
+const loadMonthFromCache = useCallback(async (year: number, month: number) => {
+  if (!user) return null;  // <-- RETORNA NULL SE USER NÃO CARREGOU
+```
+
+**SalesEvolutionChart.tsx - linha 114-117:**
+```tsx
+useEffect(() => {
+  const yearsToLoad = [selectedYearForAnnual, selectedYearForAnnual - 1];
+  loadYearlyData(yearsToLoad);  // <-- DISPARA IMEDIATAMENTE
+}, [selectedYearForAnnual, loadYearlyData]);
 ```
 
 ---
 
 ## Solução Proposta
 
-O gráfico de evolução de vendas precisa de **dados completos dos anos** para funcionar corretamente. Vamos criar uma fonte de dados separada para o gráfico que carrega os anos completos do cache, independente do filtro do Dashboard.
+### Abordagem: Garantir que User está Disponível + Retry Automático
 
-### Abordagem: Dados Anuais Dedicados para o Gráfico
-
-1. **Criar novo estado no SheetDataContext** para armazenar dados anuais completos (`yearlyRawData`)
-2. **Nova função `loadYearlyData`** que carrega anos inteiros do cache para o gráfico
-3. **SalesEvolutionChart usa `yearlyRawData`** em vez de `rawData`
+Modificar o fluxo para:
+1. **Aguardar user carregado** antes de tentar buscar dados
+2. **Re-executar** quando user ficar disponível
+3. **Evitar múltiplas chamadas** com controle de estado
 
 ---
 
@@ -43,130 +51,208 @@ O gráfico de evolução de vendas precisa de **dados completos dos anos** para 
 
 ### 1. `src/contexts/SheetDataContext.tsx`
 
-**Adicionar novo estado e função:**
+**Modificar `loadYearlyData` para verificar user e expor status:**
 
 ```tsx
-// Novo estado para dados anuais (usado pelo gráfico de evolução)
-const [yearlyRawData, setYearlyRawData] = useState<RawSaleRow[]>([]);
-
-// Função para carregar anos completos do cache
+// Adicionar dependência do user
 const loadYearlyData = useCallback(async (years: number[]) => {
-  const allData: RawSaleRow[] = [];
+  if (years.length === 0) return;
   
-  for (const year of years) {
-    for (let month = 1; month <= 12; month++) {
-      const monthData = await getMonthData(year, month);
-      if (monthData) {
-        allData.push(...monthData);
-      }
-    }
+  // Verificar se user está disponível via supabase diretamente
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    console.log('[YearlyData] User not available yet, skipping load');
+    return;
   }
   
-  setYearlyRawData(allData);
+  setIsLoadingYearly(true);
+  const allData: RawSaleRow[] = [];
+  
+  try {
+    for (const year of years) {
+      for (let month = 1; month <= 12; month++) {
+        const monthData = await getMonthData(year, month);
+        if (monthData) {
+          allData.push(...monthData);
+          console.log(`[YearlyData] Loaded ${year}-${month}: ${monthData.length} records`);
+        }
+      }
+    }
+    
+    setYearlyRawData(allData);
+    console.log(`[YearlyData] Total: ${allData.length} records for years: ${years.join(', ')}`);
+  } catch (error) {
+    console.error('[YearlyData] Error loading yearly data:', error);
+  } finally {
+    setIsLoadingYearly(false);
+  }
 }, [getMonthData]);
 ```
 
-**Expor no contexto:**
-```tsx
-value={{
-  // ... existentes
-  yearlyRawData,
-  loadYearlyData,
-}}
-```
-
 ---
 
-### 2. `src/hooks/useErpCache.ts`
+### 2. `src/components/dashboard/SalesEvolutionChart.tsx`
 
-**Adicionar função `getMonthData`** (se não existir) para buscar dados de um mês específico do cache:
-
-```tsx
-const getMonthData = useCallback(async (year: number, month: number): Promise<RawSaleRow[] | null> => {
-  const { data, error } = await supabase
-    .from('erp_cache')
-    .select('data')
-    .eq('year', year)
-    .eq('month', month)
-    .single();
-    
-  if (error || !data) return null;
-  return data.data as RawSaleRow[];
-}, []);
-```
-
----
-
-### 3. `src/components/dashboard/SalesEvolutionChart.tsx`
-
-**Alterar para usar `yearlyRawData`:**
+**Modificar useEffect para reagir ao user e aguardar carregamento:**
 
 ```tsx
-export function SalesEvolutionChart({ filialId = 'todas' }) {
-  const { yearlyRawData, loadYearlyData } = useSheetData();
+import { useAuth } from '@/contexts/AuthContext';
+
+export function SalesEvolutionChart({ filialId = 'todas' }: SalesEvolutionChartProps) {
+  const { user, loading: authLoading } = useAuth();
+  const { rawData, yearlyRawData, isLoadingYearly, loadYearlyData } = useSheetData();
   
-  // Carregar anos relevantes quando o componente monta ou ano selecionado muda
+  // ... estados existentes ...
+  
+  // Track if we've already loaded for this year to avoid duplicate calls
+  const [loadedYears, setLoadedYears] = useState<string>('');
+  
+  // Load yearly data when:
+  // 1. User is authenticated (not loading anymore)
+  // 2. Selected year changes
   useEffect(() => {
+    // Don't load if auth is still loading
+    if (authLoading) {
+      console.log('[SalesEvolution] Auth still loading, waiting...');
+      return;
+    }
+    
+    // Don't load if no user
+    if (!user) {
+      console.log('[SalesEvolution] No user, skipping load');
+      return;
+    }
+    
+    const yearsKey = `${selectedYearForAnnual}-${selectedYearForAnnual - 1}`;
+    
+    // Avoid reloading same years
+    if (loadedYears === yearsKey && yearlyRawData.length > 0) {
+      console.log('[SalesEvolution] Years already loaded:', yearsKey);
+      return;
+    }
+    
+    console.log('[SalesEvolution] Loading years:', yearsKey);
     const yearsToLoad = [selectedYearForAnnual, selectedYearForAnnual - 1];
     loadYearlyData(yearsToLoad);
-  }, [selectedYearForAnnual, loadYearlyData]);
-  
-  // Usar yearlyRawData em vez de rawData
-  const yearlyComparisonData = useMemo(() => {
-    const filialFiltered = filialId === 'todas' 
-      ? yearlyRawData  // ← Alterado de rawData para yearlyRawData
-      : yearlyRawData.filter(r => normalizeFilialId(r.Filial) === filialId);
-    // ... resto igual
-  }, [yearlyRawData, filialId, selectedYearForAnnual]);
+    setLoadedYears(yearsKey);
+  }, [selectedYearForAnnual, loadYearlyData, user, authLoading, loadedYears, yearlyRawData.length]);
+
+  // ... resto do componente ...
 }
 ```
 
 ---
 
-## Comportamento Esperado Após Implementação
+### 3. `src/hooks/useErpCache.ts`
 
-| Cenário | Antes | Depois |
-|---------|-------|--------|
-| Gráfico 2026 vs 2025 | "Dados de 2025 não disponíveis" | Mostra barras comparativas de todos os meses |
-| Filtro Dashboard: Dez/2025 | Afeta gráfico de evolução | Não afeta - gráfico tem dados próprios |
-| Cache com anos incompletos | Mostra mensagem de erro | Mostra dados disponíveis, omite meses sem dados |
+**Melhorar logs e tratamento de erro no getMonthData:**
 
----
+```tsx
+// Modificar getMonthData para logar quando user não disponível
+const getMonthData = useCallback(async (year: number, month: number): Promise<RawSaleRow[] | null> => {
+  const entry = await loadMonthFromCache(year, month);
+  if (!entry) {
+    // Log detalhado para debug
+    console.log(`[Cache] getMonthData(${year}-${month}): No data found (user: ${user ? 'yes' : 'no'})`);
+  }
+  return entry?.data || null;
+}, [loadMonthFromCache, user]);
+```
 
-## Fluxo Após Correção
+**Também modificar loadMonthFromCache para buscar user diretamente se necessário:**
 
-```text
-Dashboard: filtro = Dez/2025
-    ↓
-loadErpData(Dez/2025)
-    ↓
-rawData = [registros de Dez/2025] ← usado pelos KPIs e rankings
+```tsx
+const loadMonthFromCache = useCallback(async (year: number, month: number): Promise<MonthlyCacheEntry | null> => {
+  // Fallback: buscar user diretamente se não disponível via hook
+  let currentUser = user;
+  if (!currentUser) {
+    const { data } = await supabase.auth.getUser();
+    currentUser = data.user;
+  }
+  
+  if (!currentUser) {
+    console.log(`[Cache] loadMonthFromCache(${year}-${month}): User not available`);
+    return null;
+  }
 
-SalesEvolutionChart monta
-    ↓
-loadYearlyData([2026, 2025])
-    ↓
-yearlyRawData = [todos os registros de 2025 + 2026 do cache]
-    ↓
-Gráfico 2026 vs 2025: encontra todos os meses
-    ↓
-Barras comparativas funcionando!
+  try {
+    const { data, error } = await supabase
+      .from('erp_cache')
+      .select('data, record_count, updated_at')
+      .eq('year', year)
+      .eq('month', month)
+      .maybeSingle();
+    // ... resto igual
+  }
+}, [user, isAdmin]);
 ```
 
 ---
 
-## Otimizações Adicionais
+## Fluxo Corrigido
 
-1. **Cache local no componente**: Evitar recarregar anos já carregados
-2. **Loading state**: Mostrar skeleton enquanto carrega dados anuais
-3. **Memo dos anos**: Só recarregar quando o ano selecionado mudar de verdade
+```text
+1. SalesEvolutionChart monta
+2. useEffect verifica: authLoading = true → aguarda
+3. Auth carrega user
+4. useEffect re-executa: user disponível → continua
+5. loadYearlyData([2025, 2024])
+6. getMonthData busca cada mês do Supabase
+7. yearlyRawData = [todos os registros de 2024 e 2025]
+8. Gráfico renderiza barras comparativas corretamente!
+```
 
 ---
 
-## Resumo de Alterações
+## Melhorias Adicionais
+
+### Debug Visual Temporário
+Adicionar indicador de debug na UI para facilitar troubleshooting:
+
+```tsx
+{/* Debug info - remover em produção */}
+{process.env.NODE_ENV === 'development' && (
+  <p className="text-xs text-muted-foreground">
+    Debug: {isLoadingYearly ? 'Loading...' : `${yearlyRawData.length} records`}
+  </p>
+)}
+```
+
+### Retry Automático
+Se ainda falhar após 2 segundos, tentar novamente:
+
+```tsx
+useEffect(() => {
+  if (authLoading || !user) return;
+  
+  const timer = setTimeout(() => {
+    if (yearlyRawData.length === 0 && !isLoadingYearly) {
+      console.log('[SalesEvolution] Retry loading...');
+      loadYearlyData([selectedYearForAnnual, selectedYearForAnnual - 1]);
+    }
+  }, 2000);
+  
+  return () => clearTimeout(timer);
+}, [yearlyRawData.length, isLoadingYearly, ...]);
+```
+
+---
+
+## Resumo das Alterações
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/hooks/useErpCache.ts` | Adicionar `getMonthData()` para buscar mês específico |
-| `src/contexts/SheetDataContext.tsx` | Adicionar `yearlyRawData` e `loadYearlyData()` |
-| `src/components/dashboard/SalesEvolutionChart.tsx` | Usar `yearlyRawData` e chamar `loadYearlyData` no mount |
+| `src/contexts/SheetDataContext.tsx` | Verificar user via supabase.auth.getUser() antes de carregar dados |
+| `src/components/dashboard/SalesEvolutionChart.tsx` | Aguardar authLoading=false e user disponível antes de chamar loadYearlyData |
+| `src/hooks/useErpCache.ts` | Fallback para buscar user diretamente + logs de debug |
+
+---
+
+## Resultado Esperado
+
+| Cenário | Antes | Depois |
+|---------|-------|--------|
+| 2025 vs 2024 | "Dados não disponíveis" | Barras comparativas de 12 meses |
+| Tempo de carregamento | Instantâneo (mas vazio) | ~1-2s (aguarda auth + busca dados) |
+| Mensagem durante loading | Nenhuma | Skeleton loading |
+| Logs de debug | Poucos | Detalhados para troubleshooting |
