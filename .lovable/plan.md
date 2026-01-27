@@ -1,232 +1,100 @@
 
-# Plano: Otimizar Cache Local IndexedDB
+# Plano: Corrigir Duplicacao de Dados no Grafico de Evolucao
 
 ## Problema Identificado
 
-O cache local do IndexedDB esta armazenando dados brutos completos de todos os meses (37 meses atualmente), resultando em um tamanho estimado de 70-100 MB por navegador.
+O tooltip do grafico esta mostrando valores incorretos (aproximadamente 2.5x maiores que o esperado) devido a uma duplicacao na soma dos dados agregados.
 
----
+### Causa Raiz
 
-## Solucao Recomendada: Abordagem Hibrida
-
-Combinar 3 estrategias para reducao maxima:
-
-### 1. Limite de Periodo no Cache Local
-
-Manter apenas os ultimos 12 meses no IndexedDB local. Meses mais antigos serao carregados do Supabase quando necessario.
-
-```text
-ANTES (37 meses):
-[Jan/23] [Fev/23] ... [Dez/25] = ~95 MB
-
-DEPOIS (12 meses):
-[Fev/25] [Mar/25] ... [Jan/26] = ~26 MB
-                                 (-73%)
-```
-
-### 2. Limpeza Automatica de Meses Antigos
-
-Quando um novo mes for salvo, remover automaticamente meses que excedam o limite.
+Quando o filtro `filialId = 'todas'`, a query no `fetchAggregates` nao aplica filtro de filial:
 
 ```typescript
-// Nova constante em indexeddb.ts
-const MAX_LOCAL_MONTHS = 12;
-
-// Nova funcao
-export async function pruneOldLocalMonths(maxMonths: number) {
-  const allMonths = await getAllLocalMonths();
-  if (allMonths.length <= maxMonths) return;
-  
-  // Ordenar por data (mais recente primeiro)
-  allMonths.sort((a, b) => b.key.localeCompare(a.key));
-  
-  // Deletar meses excedentes
-  for (let i = maxMonths; i < allMonths.length; i++) {
-    const [year, month] = allMonths[i].key.split('-').map(Number);
-    await deleteLocalMonthData(year, month);
-  }
+// Em useChartAggregates.ts - linha 48-50
+if (filialId && filialId !== 'todas') {
+  query = query.eq('filial', filialId);
 }
 ```
 
-### 3. Configuracao de Retencao pelo Usuario
+Isso retorna TODOS os registros com `colaborador IS NULL`:
 
-Adicionar opcao nas configuracoes para o usuario escolher:
+| filial | faturamento (Jan/2026) |
+|--------|------------------------|
+| Combo Iguassu | 325.261 |
+| Combo Iguassu Agencias | 92.244 |
+| Combo Iguassu Cataratas | 313.233 |
+| Combo Iguassu Web | 644.446 |
+| **todas** | **1.375.184** (total consolidado) |
 
-```text
-+------------------------------------------+
-| Cache Local                              |
-|                                          |
-| Manter dados dos ultimos:                |
-|  [6 meses]  [12 meses]  [24 meses]       |
-|                                          |
-| Tamanho atual: 26 MB (12 meses)          |
-| [Limpar Cache Local]                     |
-+------------------------------------------+
+O `getYearlyChartData` soma TODOS esses registros:
+```typescript
+const currentYearData = aggregateData
+  .filter(a => a.year === currentYear && a.month === month)
+  .reduce((sum, a) => sum + a.faturamento, 0);
 ```
 
----
+**Resultado:** 325.261 + 92.244 + 313.233 + 644.446 + 1.375.184 = **2.750.368** (ERRADO!)
 
-## Arquivos a Modificar
-
-### 1. `src/lib/indexeddb.ts`
-
-| Mudanca | Descricao |
-|---------|-----------|
-| Adicionar `MAX_LOCAL_MONTHS` | Constante para limite padrao (12) |
-| Adicionar `pruneOldLocalMonths()` | Funcao para limpar meses antigos |
-| Modificar `setLocalMonthData()` | Chamar prune apos salvar novo mes |
-
-### 2. `src/hooks/useErpCache.ts`
-
-| Mudanca | Descricao |
-|---------|-----------|
-| Integrar limpeza automatica | Chamar prune apos salvar dados |
-| Expor funcao de config | Para UI de configuracoes |
-
-### 3. `src/components/dashboard/CacheInfoButton.tsx`
-
-| Mudanca | Descricao |
-|---------|-----------|
-| Mostrar tamanho real | Exibir MB usado no IndexedDB |
-| Adicionar seletor de retencao | Dropdown 6/12/24 meses |
-| Botao limpar cache local | Separado do cache Supabase |
+O valor correto e apenas **1.375.184** (o registro `filial = 'todas'`).
 
 ---
 
-## Detalhes Tecnicos
+## Solucao
 
-### Nova Funcao: Limpar Meses Antigos
+Modificar a query para filtrar `filial = 'todas'` quando o usuario seleciona "todas" as filiais:
 
 ```typescript
-// src/lib/indexeddb.ts
+// ANTES (errado):
+if (filialId && filialId !== 'todas') {
+  query = query.eq('filial', filialId);
+}
 
-const DEFAULT_MAX_LOCAL_MONTHS = 12;
-
-export async function pruneOldLocalMonths(
-  maxMonths: number = DEFAULT_MAX_LOCAL_MONTHS
-): Promise<number> {
-  const allMonths = await getAllLocalMonths();
-  
-  if (allMonths.length <= maxMonths) {
-    return 0; // Nada a fazer
-  }
-  
-  // Ordenar por chave (mais recente primeiro: 2026-01 > 2025-12)
-  const sorted = allMonths.sort((a, b) => 
-    b.key.localeCompare(a.key)
-  );
-  
-  let deletedCount = 0;
-  
-  // Manter apenas os N mais recentes
-  for (let i = maxMonths; i < sorted.length; i++) {
-    const [year, month] = sorted[i].key.split('-').map(Number);
-    const success = await deleteLocalMonthData(year, month);
-    if (success) deletedCount++;
-  }
-  
-  console.log(`[IndexedDB] Pruned ${deletedCount} old months, kept ${maxMonths}`);
-  return deletedCount;
+// DEPOIS (correto):
+if (filialId === 'todas') {
+  query = query.eq('filial', 'todas');
+} else if (filialId) {
+  query = query.eq('filial', filialId);
 }
 ```
 
-### Integracao no Save
+---
+
+## Arquivo a Modificar
+
+### `src/hooks/useChartAggregates.ts`
+
+| Linha | Mudanca |
+|-------|---------|
+| 47-50 | Adicionar filtro explicito para `filial = 'todas'` |
+
+### Codigo Atualizado:
 
 ```typescript
-// Em useErpCache.ts - modificar setMonthData
-
-const setMonthData = useCallback(async (...) => {
-  // ... save to Supabase ...
-  
-  if (isIndexedDBAvailable()) {
-    await setLocalMonthData(year, month, data);
-    
-    // Limpar meses antigos automaticamente
-    const { pruneOldLocalMonths } = await import('@/lib/indexeddb');
-    await pruneOldLocalMonths(12); // Manter ultimos 12 meses
-    
-    // Atualizar stats
-    const stats = await getLocalCacheStats();
-    setLocalCacheStats({...});
-  }
-  // ...
-});
-```
-
-### UI de Configuracao
-
-```tsx
-// Em CacheInfoButton.tsx - adicionar secao
-
-<div className="space-y-2">
-  <Label>Manter dados locais dos ultimos:</Label>
-  <Select 
-    value={localRetention} 
-    onValueChange={handleRetentionChange}
-  >
-    <SelectItem value="6">6 meses (~13 MB)</SelectItem>
-    <SelectItem value="12">12 meses (~26 MB)</SelectItem>
-    <SelectItem value="24">24 meses (~52 MB)</SelectItem>
-  </Select>
-</div>
+// Filter by filial
+if (filialId === 'todas' || !filialId) {
+  // When "todas" is selected, use the pre-calculated total
+  query = query.eq('filial', 'todas');
+} else {
+  // When a specific filial is selected
+  query = query.eq('filial', filialId);
+}
 ```
 
 ---
 
-## Economia de Espaco Esperada
+## Validacao dos Valores
 
-| Configuracao | Meses | Registros | Tamanho Estimado |
-|--------------|-------|-----------|------------------|
-| 6 meses | 6 | ~35.000 | ~13 MB |
-| 12 meses (padrao) | 12 | ~68.000 | ~26 MB |
-| 24 meses | 24 | ~136.000 | ~52 MB |
-| Sem limite | 37+ | ~200.000+ | ~95 MB+ |
+Apos a correcao, os valores esperados serao:
 
-**Reducao com 12 meses: -73% comparado a manter tudo**
+| Mes | Ano Atual (2026) | Ano Anterior (2025) | Variacao |
+|-----|------------------|---------------------|----------|
+| Jan | R$ 1.375.184 | R$ 1.736.631 | -20.8% |
 
 ---
 
-## Fluxo de Funcionamento
+## Impacto
 
-```text
-Usuario abre o dashboard
-         |
-         v
-[Carregar do IndexedDB] <-- Ultimos 12 meses (instantaneo)
-         |
-         v
-Usuario seleciona periodo antigo (ex: Jan/2023)
-         |
-         v
-[Nao esta no IndexedDB local]
-         |
-         v
-[Buscar do Supabase] --> Exibir dados
-         |
-         v
-[NAO salvar no IndexedDB] <-- Evita acumulo
-```
-
-Dados antigos ficam apenas no Supabase e sao buscados sob demanda, sem poluir o cache local.
-
----
-
-## Resultado Visual
-
-```text
-+------------------------------------------+
-| Cache de Dados                           |
-+------------------------------------------+
-| ⚡ Cache Local (Instantaneo)             |
-|   Meses: 12  |  Registros: 68.420        |
-|   Tamanho: 26.3 MB                       |
-|                                          |
-|   Manter ultimos: [12 meses v]           |
-|                                          |
-|   [Limpar Cache Local]                   |
-+------------------------------------------+
-| 🗄️ Cache Supabase (Sincronizado)         |
-|   Meses: 37  |  Tamanho: 12.2 MB         |
-+------------------------------------------+
-```
-
+- Corrige duplicacao para filtro "todas" (que e o padrao)
+- Mantem comportamento correto para filiais especificas
+- Sem impacto em outras funcionalidades
+- Mudanca minima (apenas 4 linhas)
