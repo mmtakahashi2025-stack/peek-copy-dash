@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -6,7 +6,7 @@ import { Switch } from '@/components/ui/switch';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { FileSpreadsheet, Upload, Loader2, CheckCircle, XCircle, Trash2 } from 'lucide-react';
+import { FileSpreadsheet, Upload, Loader2, CheckCircle, XCircle, Trash2, Calendar } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -46,18 +46,61 @@ const MONTHS_DISPLAY = [
 
 // Generate year options
 const currentYear = new Date().getFullYear();
-const YEAR_OPTIONS = [currentYear - 2, currentYear - 1, currentYear, currentYear + 1];
+const YEAR_OPTIONS = [currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
 
 // Tab naming patterns
 type TabPattern = 'prefix-month' | 'month-year';
 
-// Generate tab names based on pattern
-const generateTabNames = (pattern: TabPattern, prefix: string, year: number): string[] => {
-  if (pattern === 'month-year') {
-    return MONTHS_PT.map(month => `${month} ${year}`);
+// Generate tab names for a date range
+const generateTabNamesForRange = (
+  startMonth: number, // 1-12
+  startYear: number,
+  endMonth: number,   // 1-12
+  endYear: number,
+  pattern: TabPattern,
+  prefix: string
+): string[] => {
+  const tabs: string[] = [];
+  let currentMonth = startMonth;
+  let currentYr = startYear;
+  
+  // Safety limit to prevent infinite loops
+  const maxIterations = 36;
+  let iterations = 0;
+  
+  while (
+    (currentYr < endYear || (currentYr === endYear && currentMonth <= endMonth)) &&
+    iterations < maxIterations
+  ) {
+    const monthName = MONTHS_PT[currentMonth - 1];
+    
+    if (pattern === 'month-year') {
+      tabs.push(`${monthName} ${currentYr}`);
+    } else {
+      tabs.push(`${prefix} ${monthName}`);
+    }
+    
+    currentMonth++;
+    if (currentMonth > 12) {
+      currentMonth = 1;
+      currentYr++;
+    }
+    iterations++;
   }
-  // prefix-month: "LEADS JANEIRO", "LEADS FEVEREIRO", etc.
-  return MONTHS_PT.map(month => `${prefix} ${month}`);
+  
+  return tabs;
+};
+
+// Validate that end date is not before start date
+const isValidDateRange = (
+  startMonth: number, 
+  startYear: number, 
+  endMonth: number, 
+  endYear: number
+): boolean => {
+  if (endYear > startYear) return true;
+  if (endYear === startYear && endMonth >= startMonth) return true;
+  return false;
 };
 
 export function LeadsImportSection() {
@@ -67,14 +110,44 @@ export function LeadsImportSection() {
   const [importAllTabs, setImportAllTabs] = useState(true);
   const [tabPrefix, setTabPrefix] = useState('LEADS');
   const [tabPattern, setTabPattern] = useState<TabPattern>('month-year');
-  const [tabYear, setTabYear] = useState(currentYear.toString());
   const [progress, setProgress] = useState({ current: 0, total: 0, currentTab: '' });
+  
+  // Multi-year range states
+  const [startMonth, setStartMonth] = useState('7'); // July
+  const [startYear, setStartYear] = useState(currentYear.toString());
+  const [endMonth, setEndMonth] = useState('1'); // January
+  const [endYear, setEndYear] = useState((currentYear + 1).toString());
   
   // Clear before import options
   const [clearBeforeImport, setClearBeforeImport] = useState(false);
   const [clearYear, setClearYear] = useState(currentYear.toString());
   const [clearMonth, setClearMonth] = useState<string>('all');
   const [isClearing, setIsClearing] = useState(false);
+
+  // Calculate preview of tabs to be imported
+  const tabsPreview = useMemo(() => {
+    if (tabPattern === 'month-year') {
+      const sMonth = parseInt(startMonth);
+      const sYear = parseInt(startYear);
+      const eMonth = parseInt(endMonth);
+      const eYear = parseInt(endYear);
+      
+      if (!isValidDateRange(sMonth, sYear, eMonth, eYear)) {
+        return { valid: false, tabs: [], message: 'Período final deve ser igual ou posterior ao inicial' };
+      }
+      
+      const tabs = generateTabNamesForRange(sMonth, sYear, eMonth, eYear, tabPattern, tabPrefix);
+      return { 
+        valid: true, 
+        tabs, 
+        message: `${tabs.length} aba${tabs.length > 1 ? 's' : ''}: ${tabs[0]} → ${tabs[tabs.length - 1]}` 
+      };
+    }
+    
+    // For prefix-month pattern, show all 12 months
+    const tabs = MONTHS_PT.map(month => `${tabPrefix} ${month}`);
+    return { valid: true, tabs, message: `12 abas: ${tabPrefix} JANEIRO → ${tabPrefix} DEZEMBRO` };
+  }, [tabPattern, startMonth, startYear, endMonth, endYear, tabPrefix]);
 
   const processSheetData = (rows: Record<string, unknown>[]): LeadRecord[] => {
     const records: LeadRecord[] = [];
@@ -204,10 +277,15 @@ export function LeadsImportSection() {
       return;
     }
 
+    if (!tabsPreview.valid) {
+      toast.error(tabsPreview.message);
+      return;
+    }
+
     setIsImporting(true);
     setImportResult(null);
     
-    const tabNames = generateTabNames(tabPattern, tabPrefix, parseInt(tabYear));
+    const tabNames = tabsPreview.tabs;
     const details: { tabName: string; count: number; error?: string }[] = [];
     let totalCount = 0;
 
@@ -338,7 +416,7 @@ export function LeadsImportSection() {
             Importar todas as abas (meses)
           </Label>
           <p className="text-xs text-muted-foreground">
-            Importa todas as abas com o prefixo definido
+            Importa todas as abas do período definido
           </p>
         </div>
         <Switch
@@ -365,21 +443,73 @@ export function LeadsImportSection() {
           </div>
 
           {tabPattern === 'month-year' ? (
-            <div className="space-y-2">
-              <Label htmlFor="tab-year">Ano das abas</Label>
-              <Select value={tabYear} onValueChange={setTabYear} disabled={isImporting}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {YEAR_OPTIONS.map(year => (
-                    <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Ex: "JANEIRO {tabYear}", "FEVEREIRO {tabYear}", ..., "DEZEMBRO {tabYear}"
-              </p>
+            <div className="space-y-3">
+              {/* Start period */}
+              <div className="space-y-2">
+                <Label className="text-sm flex items-center gap-1">
+                  <Calendar className="h-3 w-3" />
+                  Período Inicial
+                </Label>
+                <div className="flex gap-2">
+                  <Select value={startMonth} onValueChange={setStartMonth} disabled={isImporting}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MONTHS_DISPLAY.map((month, idx) => (
+                        <SelectItem key={idx} value={(idx + 1).toString()}>{month}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={startYear} onValueChange={setStartYear} disabled={isImporting}>
+                    <SelectTrigger className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {YEAR_OPTIONS.map(year => (
+                        <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              {/* End period */}
+              <div className="space-y-2">
+                <Label className="text-sm flex items-center gap-1">
+                  <Calendar className="h-3 w-3" />
+                  Período Final
+                </Label>
+                <div className="flex gap-2">
+                  <Select value={endMonth} onValueChange={setEndMonth} disabled={isImporting}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MONTHS_DISPLAY.map((month, idx) => (
+                        <SelectItem key={idx} value={(idx + 1).toString()}>{month}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={endYear} onValueChange={setEndYear} disabled={isImporting}>
+                    <SelectTrigger className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {YEAR_OPTIONS.map(year => (
+                        <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Tabs preview */}
+              <div className={`p-2 rounded-lg text-xs ${tabsPreview.valid ? 'bg-primary/10 text-primary' : 'bg-destructive/10 text-destructive'}`}>
+                <span className="flex items-center gap-1">
+                  📋 {tabsPreview.message}
+                </span>
+              </div>
             </div>
           ) : (
             <div className="space-y-2">
@@ -475,7 +605,7 @@ export function LeadsImportSection() {
         variant="secondary"
         size="sm"
         onClick={handleImport}
-        disabled={isImporting || !sheetUrl.trim()}
+        disabled={isImporting || !sheetUrl.trim() || (importAllTabs && !tabsPreview.valid)}
         className="w-full"
       >
         {isImporting ? (
