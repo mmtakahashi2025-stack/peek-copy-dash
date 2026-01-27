@@ -22,7 +22,7 @@ export type Database = {
           month: number
           record_count: number
           updated_at: string
-          user_id: string
+          user_id: string | null
           year: number
         }
         Insert: {
@@ -32,7 +32,7 @@ export type Database = {
           month: number
           record_count?: number
           updated_at?: string
-          user_id: string
+          user_id?: string | null
           year: number
         }
         Update: {
@@ -42,7 +42,7 @@ export type Database = {
           month?: number
           record_count?: number
           updated_at?: string
-          user_id?: string
+          user_id?: string | null
           year?: number
         }
         Relationships: []
@@ -57,7 +57,7 @@ export type Database = {
           total_revenue: number
           unique_sales: number
           updated_at: string
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           created_at?: string
@@ -68,7 +68,7 @@ export type Database = {
           total_revenue?: number
           unique_sales?: number
           updated_at?: string
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           created_at?: string
@@ -79,7 +79,7 @@ export type Database = {
           total_revenue?: number
           unique_sales?: number
           updated_at?: string
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: []
       }
