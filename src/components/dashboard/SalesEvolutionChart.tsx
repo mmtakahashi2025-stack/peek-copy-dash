@@ -270,22 +270,25 @@ export function SalesEvolutionChart({
           {/* Faturamento Anual com Comparativo do Ano Anterior */}
           <TabsContent value="anual" className="h-[280px]">
             <div className="flex flex-col gap-1 mb-4">
-              <div className="flex items-center gap-2">
-                <Select 
-                  value={String(selectedYearForAnnual)} 
-                  onValueChange={(v) => setSelectedYearForAnnual(parseInt(v))}
-                >
-                  <SelectTrigger className="w-[100px] h-8">
-                    <SelectValue placeholder="Ano" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {yearOptions.map((year) => (
-                      <SelectItem key={year} value={String(year)}>{year}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-muted-foreground">Ano</span>
+                  <Select 
+                    value={String(selectedYearForAnnual)} 
+                    onValueChange={(v) => setSelectedYearForAnnual(parseInt(v))}
+                  >
+                    <SelectTrigger className="w-[100px] h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {yearOptions.map((year) => (
+                        <SelectItem key={year} value={String(year)}>{year}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <span className="text-sm text-muted-foreground">
-                  {comparisonLabel}
+                  comparado com {previousYear}
                 </span>
               </div>
               {hasYearlyData && !hasPreviousYearData && (
@@ -350,34 +353,40 @@ export function SalesEvolutionChart({
           
           {/* Faturamento Mensal por Dias */}
           <TabsContent value="mensal" className="h-[280px]">
-            <div className="flex gap-2 mb-4">
-              <Select 
-                value={String(selectedMonth)} 
-                onValueChange={(v) => setSelectedMonth(parseInt(v))}
-              >
-                <SelectTrigger className="w-[140px] h-8">
-                  <SelectValue placeholder="Mês" />
-                </SelectTrigger>
-                <SelectContent>
-                  {mesesCompletos.map((mes, index) => (
-                    <SelectItem key={index} value={String(index)}>{mes}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="flex items-center gap-4 mb-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-muted-foreground">Mês</span>
+                <Select 
+                  value={String(selectedMonth)} 
+                  onValueChange={(v) => setSelectedMonth(parseInt(v))}
+                >
+                  <SelectTrigger className="w-[140px] h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {mesesCompletos.map((mes, index) => (
+                      <SelectItem key={index} value={String(index)}>{mes}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               
-              <Select 
-                value={String(selectedYear)} 
-                onValueChange={(v) => setSelectedYear(parseInt(v))}
-              >
-                <SelectTrigger className="w-[100px] h-8">
-                  <SelectValue placeholder="Ano" />
-                </SelectTrigger>
-                <SelectContent>
-                  {yearOptions.map((year) => (
-                    <SelectItem key={year} value={String(year)}>{year}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-muted-foreground">Ano</span>
+                <Select 
+                  value={String(selectedYear)} 
+                  onValueChange={(v) => setSelectedYear(parseInt(v))}
+                >
+                  <SelectTrigger className="w-[100px] h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {yearOptions.map((year) => (
+                      <SelectItem key={year} value={String(year)}>{year}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             
             <div className="h-[220px]">
