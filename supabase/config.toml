@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.test-erp-login]
 verify_jwt = false
+
+[functions.erp-credentials-status]
+verify_jwt = false
+
+[functions.reload-erp-cache]
+verify_jwt = false
