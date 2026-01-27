@@ -151,6 +151,8 @@ interface SheetDataContextType {
   erpCredentials: UserErpCredentials | null;
   cacheMeta: CacheMeta;
   localCacheStats: LocalCacheStats | null;
+  localRetention: number;
+  updateLocalRetention: (months: number) => Promise<void>;
   loadingProgress: LoadingProgressState;
   isAdmin: boolean;
   getKpis: (filialId: string, dateFilter?: DateFilter, leadsRecebidos?: number) => KpiData[];
@@ -256,6 +258,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     monthsToRefresh: MONTHS_TO_REFRESH_CONFIG,
     isAdmin: isAdminFromCache,
     localCacheStats: localCacheStatsFromHook,
+    localRetention,
+    updateLocalRetention,
   } = useErpCache();
 
   // Load yearly data for the evolution chart (independent of dashboard filters)
@@ -1185,6 +1189,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       erpCredentials,
       cacheMeta,
       localCacheStats: localCacheStatsFromHook,
+      localRetention,
+      updateLocalRetention,
       loadingProgress,
       isAdmin: isAdminFromCache,
       getKpis,

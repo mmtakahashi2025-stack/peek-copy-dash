@@ -8,6 +8,10 @@ const DB_VERSION = 1;
 const STORE_ERP_MONTHLY = 'erp-monthly';
 const STORE_META = 'cache-meta';
 
+// Local cache retention settings
+export const DEFAULT_MAX_LOCAL_MONTHS = 12;
+const LOCAL_RETENTION_KEY = 'erp-local-cache-retention';
+
 export interface LocalCacheEntry {
   key: string;           // "2026-01" format
   data: unknown[];       // Raw sale rows
@@ -367,5 +371,75 @@ export function isIndexedDBAvailable(): boolean {
     return typeof indexedDB !== 'undefined' && indexedDB !== null;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Get user's local cache retention preference
+ */
+export function getLocalCacheRetention(): number {
+  try {
+    const stored = localStorage.getItem(LOCAL_RETENTION_KEY);
+    if (stored) {
+      const value = parseInt(stored, 10);
+      if ([6, 12, 24].includes(value)) {
+        return value;
+      }
+    }
+  } catch {
+    // localStorage not available
+  }
+  return DEFAULT_MAX_LOCAL_MONTHS;
+}
+
+/**
+ * Set user's local cache retention preference
+ */
+export function setLocalCacheRetention(months: number): void {
+  try {
+    if ([6, 12, 24].includes(months)) {
+      localStorage.setItem(LOCAL_RETENTION_KEY, String(months));
+    }
+  } catch {
+    // localStorage not available
+  }
+}
+
+/**
+ * Prune old months from local cache, keeping only the most recent N months
+ * Returns the number of months deleted
+ */
+export async function pruneOldLocalMonths(
+  maxMonths: number = DEFAULT_MAX_LOCAL_MONTHS
+): Promise<number> {
+  try {
+    const allMonths = await getAllLocalMonths();
+    
+    if (allMonths.length <= maxMonths) {
+      return 0; // Nothing to prune
+    }
+    
+    // Sort by key (most recent first: 2026-01 > 2025-12)
+    const sorted = [...allMonths].sort((a, b) => 
+      b.key.localeCompare(a.key)
+    );
+    
+    let deletedCount = 0;
+    
+    // Keep only the N most recent months
+    for (let i = maxMonths; i < sorted.length; i++) {
+      const [year, month] = sorted[i].key.split('-').map(Number);
+      const success = await deleteLocalMonthData(year, month);
+      if (success) deletedCount++;
+    }
+    
+    if (deletedCount > 0) {
+      console.log(`[IndexedDB] Pruned ${deletedCount} old months, kept ${maxMonths}`);
+    }
+    
+    return deletedCount;
+  } catch (error) {
+    console.error('[IndexedDB] pruneOldLocalMonths error:', error);
+    return 0;
   }
 }

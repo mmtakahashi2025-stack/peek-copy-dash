@@ -1,22 +1,37 @@
-import { Trash2, Database, Clock, HardDrive, Calendar, RefreshCw, Zap } from 'lucide-react';
+import { Trash2, Database, Clock, HardDrive, Calendar, RefreshCw, Zap, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 import { useSheetData } from '@/contexts/SheetDataContext';
 import { useUserRole } from '@/hooks/useUserRole';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 
 export function CacheInfoButton() {
-  const { cacheMeta, clearCache, localCacheStats } = useSheetData();
+  const { cacheMeta, clearCache, localCacheStats, localRetention, updateLocalRetention } = useSheetData();
   const { isAdmin, isLoading } = useUserRole();
 
   const handleClearCache = async () => {
     await clearCache();
     toast.success('Cache limpo com sucesso');
+  };
+
+  const handleRetentionChange = async (value: string) => {
+    const months = parseInt(value, 10);
+    await updateLocalRetention(months);
+    toast.success(`Cache local ajustado para manter ${months} meses`);
   };
 
   const formatDate = (date: Date | null) => {
@@ -82,18 +97,19 @@ export function CacheInfoButton() {
                 className="h-7 text-xs gap-1"
               >
                 <Trash2 className="h-3 w-3" />
-                Limpar
+                Limpar Tudo
               </Button>
             )}
           </div>
           
           {/* Local Cache Section */}
           {localCacheStats?.isAvailable && (
-            <div className="space-y-2 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+            <div className="space-y-3 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
               <div className="flex items-center gap-2 text-sm font-medium text-yellow-600 dark:text-yellow-400">
                 <Zap className="h-4 w-4" />
                 <span>Cache Local (Instantâneo)</span>
               </div>
+              
               <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                 <div>
                   <span>Meses: </span>
@@ -108,6 +124,32 @@ export function CacheInfoButton() {
                   <span className="font-medium text-foreground">{(localCacheStats.totalSizeEstimateMB || 0).toFixed(2)} MB</span>
                 </div>
               </div>
+              
+              <Separator className="bg-yellow-500/20" />
+              
+              {/* Retention Selector */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Settings className="h-3 w-3" />
+                  <Label className="text-xs">Manter dados dos últimos:</Label>
+                </div>
+                <Select 
+                  value={String(localRetention)} 
+                  onValueChange={handleRetentionChange}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="6">6 meses (~13 MB)</SelectItem>
+                    <SelectItem value="12">12 meses (~26 MB)</SelectItem>
+                    <SelectItem value="24">24 meses (~52 MB)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Meses mais antigos são carregados do servidor quando necessário.
+                </p>
+              </div>
             </div>
           )}
           
@@ -115,7 +157,7 @@ export function CacheInfoButton() {
           <div className="space-y-3 text-sm">
             <div className="flex items-center gap-2 text-muted-foreground">
               <Database className="h-4 w-4" />
-              <span>Cache Supabase (por mês):</span>
+              <span>Cache Servidor (por mês):</span>
               <span className="ml-auto font-medium text-foreground">
                 {cacheMeta.totalEntries}
               </span>
@@ -177,7 +219,7 @@ export function CacheInfoButton() {
             <p><strong>Como funciona:</strong></p>
             <ul className="list-disc list-inside space-y-0.5 pl-1">
               <li><Zap className="h-3 w-3 inline text-yellow-500" /> Local: carregamento instantâneo</li>
-              <li><Database className="h-3 w-3 inline" /> Supabase: sincronização entre dispositivos</li>
+              <li><Database className="h-3 w-3 inline" /> Servidor: sincronização entre dispositivos</li>
               <li>Últimos 3 meses: atualizam a cada 24h</li>
             </ul>
           </div>
