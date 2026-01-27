@@ -1,203 +1,182 @@
 
-# Plano: Implementar Cache no Navegador para Carregamento Instantaneo (estilo Power BI)
+# Plano: Legendas Visuais + Modo Semana + Card Maior
 
-## Analise do Problema
+## Resumo das Mudancas
 
-**Situacao atual:**
-1. Os dados estao em cache no **Supabase** (banco de dados na nuvem)
-2. Cada vez que o usuario abre o dashboard, os dados sao buscados via rede
-3. Mesmo com cache no Supabase, ha latencia de rede (~100-500ms por requisicao)
-4. Um dashboard com 12 meses de dados faz varias requisicoes ao Supabase
-
-**Por que o Power BI e instantaneo:**
-- Power BI usa cache **local no navegador** (IndexedDB)
-- Os dados ficam salvos no dispositivo do usuario
-- Ao abrir, mostra dados locais **imediatamente** enquanto verifica atualizacoes em segundo plano
+Vamos implementar as 3 melhorias no grafico de Evolucao de Vendas de forma eficiente, editando apenas 2 arquivos.
 
 ---
 
-## Solucao Proposta: Cache de 2 Camadas
+## 1. Legendas Visuais no Grafico
+
+Adicionar uma legenda visual abaixo dos seletores mostrando claramente:
+- **Quadrado colorido (primario)** + "2026" (ano atual)
+- **Quadrado cinza (40% opacidade)** + "2025" (ano anterior)
 
 ```text
-+------------------+     +------------------+     +------------------+
-|   Navegador      |     |    Supabase      |     |      ERP API     |
-|   (IndexedDB)    | <-- |    (Cache)       | <-- |    (Origem)      |
-+------------------+     +------------------+     +------------------+
-    ^                         ^                        ^
-    |                         |                        |
-  INSTANTANEO              ~100ms                   ~2-5s
-  (0ms latencia)           (rede)                  (API lenta)
+[■] 2026 (atual)   [■] 2025 (anterior)
 ```
-
-### Fluxo de Carregamento:
-1. **Imediato**: Carrega dados do IndexedDB local (0ms)
-2. **Background**: Verifica se ha dados novos no Supabase
-3. **Atualiza**: Se houver novos dados, atualiza a tela automaticamente
 
 ---
 
-## Arquitetura Tecnica
+## 2. Terceiro Modo: SEMANA
 
-### 1. Criar Hook de Cache Local
+Adicionar aba "SEMANA" entre ANO e MES com:
+- Seletor de semana (Semana 1, 2, 3... do mes)
+- Seletor de mes e ano
+- Grafico mostrando os 7 dias da semana selecionada
 
-**Novo arquivo:** `src/hooks/useLocalCache.ts`
-
-```typescript
-// Usa IndexedDB para armazenar dados localmente
-// IndexedDB suporta gigabytes de dados (muito mais que localStorage)
-
-interface LocalCacheEntry {
-  key: string;           // "erp-2026-01"
-  data: RawSaleRow[];    // Dados do mes
-  timestamp: number;     // Quando foi salvo
-  checksum: string;      // Hash para detectar mudancas
-}
-
-// Funcoes principais:
-// - getLocalData(year, month) -> dados instantaneos
-// - setLocalData(year, month, data) -> salva localmente
-// - getLocalChecksum(year, month) -> para comparar com Supabase
+```text
++--------------------------------------------------+
+|  [ANO] [SEMANA] [MES]                            |
+|                                                  |
+|  SEMANA [1 v]   MES [Janeiro v]   ANO [2026 v]   |
+|                                                  |
+|  [Seg] [Ter] [Qua] [Qui] [Sex] [Sab] [Dom]       |
++--------------------------------------------------+
 ```
-
-### 2. Modificar useErpCache.ts
-
-Adicionar camada de cache local **antes** de consultar Supabase:
-
-```typescript
-const getMonthData = async (year: number, month: number) => {
-  // 1. PRIMEIRO: Tentar cache local (instantaneo)
-  const localData = await getLocalData(year, month);
-  if (localData) {
-    console.log(`[Cache] Dados locais para ${year}-${month} (instantaneo)`);
-    
-    // 2. BACKGROUND: Verificar se Supabase tem versao mais nova
-    checkForUpdates(year, month, localData.checksum);
-    
-    return localData.data;
-  }
-  
-  // 3. FALLBACK: Buscar do Supabase se nao houver local
-  const supabaseData = await loadMonthFromCache(year, month);
-  if (supabaseData) {
-    // Salvar localmente para proxima vez
-    await setLocalData(year, month, supabaseData);
-    return supabaseData;
-  }
-  
-  return null;
-};
-```
-
-### 3. Estrategia de Sincronizacao
-
-| Situacao | Acao |
-|----------|------|
-| Dados locais existem | Mostra imediatamente + verifica atualizacoes em background |
-| Dados locais nao existem | Busca do Supabase + salva localmente |
-| Supabase tem versao nova | Atualiza dados locais + refresh na tela |
-| Usuario limpa cache | Limpa local + Supabase (admin) |
-
-### 4. Indicador Visual de Sincronizacao
-
-Adicionar badge no header mostrando estado do cache:
-- **Verde**: Dados atualizados
-- **Amarelo**: Sincronizando...
-- **Cinza**: Usando cache local (offline)
 
 ---
 
-## Arquivos a Criar/Modificar
+## 3. Card Ocupando 3 Colunas
 
-### Novos Arquivos:
-1. `src/hooks/useLocalCache.ts` - Hook para IndexedDB
-2. `src/lib/indexeddb.ts` - Utilitarios de IndexedDB
+Alterar o layout do grid no Dashboard para que o grafico ocupe toda a largura, com os rankings abaixo em 2 colunas:
 
-### Arquivos a Modificar:
-1. `src/hooks/useErpCache.ts` - Integrar cache local
-2. `src/contexts/SheetDataContext.tsx` - Usar nova estrategia
-3. `src/components/dashboard/CacheInfoButton.tsx` - Mostrar cache local
+```text
+ANTES:
++---------------+---------------+---------------+
+| Evolucao (1)  | Ranking (1)   | Produtos (1)  |
++---------------+---------------+---------------+
+
+DEPOIS:
++-----------------------------------------------+
+|          Evolucao de Vendas (3 colunas)       |
++-----------------------------------------------+
++----------------------+------------------------+
+| Ranking Vendedores   | Produtos Mais Vendidos |
++----------------------+------------------------+
+```
 
 ---
 
-## Beneficios Esperados
+## Arquivos a Modificar
 
-| Metrica | Antes | Depois |
-|---------|-------|--------|
-| Tempo de carregamento inicial | 1-3s | **< 100ms** |
-| Carregamento apos primeira visita | 1-3s | **Instantaneo** |
-| Funcionamento offline | Nao | **Sim** |
-| Uso de dados de rede | Alto | **Minimo** |
+### Arquivo 1: `src/components/dashboard/SalesEvolutionChart.tsx`
+
+| Mudanca | Localizacao |
+|---------|-------------|
+| Adicionar aba "SEMANA" no TabsList | Linha 265-268 |
+| Adicionar estado `selectedWeek` | Linha 109 |
+| Adicionar funcao `getWeekDates()` | Apos linha 95 |
+| Adicionar TabsContent para semana | Apos linha 352 |
+| Adicionar legenda visual na aba anual | Apos linha 293 |
+
+### Arquivo 2: `src/pages/Dashboard.tsx`
+
+| Mudanca | Localizacao |
+|---------|-------------|
+| Separar chart em linha propria com `col-span-3` | Linhas 227-239 |
+| Rankings em grid de 2 colunas abaixo | Nova linha |
 
 ---
 
 ## Detalhes Tecnicos
 
-### Por que IndexedDB e nao localStorage?
+### Legenda Visual (Recharts)
 
-| Caracteristica | localStorage | IndexedDB |
-|----------------|--------------|-----------|
-| Limite de tamanho | 5-10 MB | **Gigabytes** |
-| Performance | Sincrono (bloqueia) | **Assincrono** |
-| Tipos de dados | Apenas strings | **Objetos, arrays, blobs** |
-| Indices | Nao | **Sim** |
+Usar o componente `<Legend>` do Recharts ou criar uma legenda manual com divs estilizados:
 
-### Estrutura do IndexedDB:
-
-```text
-Database: "combo-iguassu-cache"
-  Store: "erp-monthly"
-    - key: "2026-01" -> { data: [...], timestamp: 1706000000, checksum: "abc123" }
-    - key: "2026-02" -> { data: [...], timestamp: 1706100000, checksum: "def456" }
-    - key: "2025-12" -> { data: [...], timestamp: 1705000000, checksum: "ghi789" }
+```tsx
+{/* Legenda manual para controle total do estilo */}
+<div className="flex items-center gap-4 mt-2">
+  <div className="flex items-center gap-1.5">
+    <div className="w-3 h-3 rounded-sm bg-primary" />
+    <span className="text-xs text-muted-foreground">{selectedYearForAnnual} (atual)</span>
+  </div>
+  <div className="flex items-center gap-1.5">
+    <div className="w-3 h-3 rounded-sm bg-muted-foreground opacity-40" />
+    <span className="text-xs text-muted-foreground">{previousYear} (anterior)</span>
+  </div>
+</div>
 ```
 
-### Calculo de Checksum:
+### Calculo de Semanas do Mes
 
-Para detectar se os dados mudaram sem baixar tudo:
-```typescript
-function calculateChecksum(data: RawSaleRow[]): string {
-  // Hash simples baseado em quantidade + soma de valores
-  const count = data.length;
-  const totalRevenue = data.reduce((sum, r) => sum + (r['Líquido'] || 0), 0);
-  return `${count}-${totalRevenue.toFixed(2)}`;
-}
+```tsx
+// Calcular semanas do mes selecionado
+const getWeeksInMonth = (year: number, month: number) => {
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const weeks: { start: number; end: number }[] = [];
+  
+  let currentDay = 1;
+  while (currentDay <= lastDay.getDate()) {
+    const weekStart = currentDay;
+    const dayOfWeek = new Date(year, month, currentDay).getDay();
+    // Semana vai ate domingo (0) ou fim do mes
+    const daysUntilSunday = (7 - dayOfWeek) % 7;
+    const weekEnd = Math.min(currentDay + daysUntilSunday, lastDay.getDate());
+    
+    weeks.push({ start: weekStart, end: weekEnd });
+    currentDay = weekEnd + 1;
+  }
+  
+  return weeks;
+};
+```
+
+### Novo Layout Dashboard
+
+```tsx
+{/* Chart ocupando largura total */}
+<div className="grid grid-cols-1 gap-6">
+  <SalesEvolutionChart 
+    filialId={filters.filial}
+    colaboradorId={filters.colaborador}
+    dateFrom={filters.dateFrom}
+    dateTo={filters.dateTo}
+    compareEnabled={filters.compareEnabled}
+    compareDateFrom={filters.compareDateFrom}
+    compareDateTo={filters.compareDateTo}
+  />
+</div>
+
+{/* Rankings lado a lado */}
+<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <RankingCard colaboradores={colaboradores} rawData={rawData} />
+  <ProductRankingCard produtos={produtos} rawData={rawData} />
+</div>
 ```
 
 ---
 
-## Implementacao em Fases
+## Economia de Creditos
 
-### Fase 1: Cache Local Basico
-- Criar hook useLocalCache com IndexedDB
-- Integrar com useErpCache
-- Mostrar dados locais instantaneamente
-
-### Fase 2: Sincronizacao em Background
-- Verificar atualizacoes do Supabase em segundo plano
-- Atualizar tela automaticamente se houver novos dados
-- Adicionar indicador de sincronizacao
-
-### Fase 3: Suporte Offline
-- Detectar quando esta offline
-- Mostrar badge "Modo Offline"
-- Sincronizar automaticamente ao reconectar
+| Aspecto | Otimizacao |
+|---------|------------|
+| Arquivos editados | Apenas 2 (vs. criar novos) |
+| Reutilizacao | Usa mesma logica de `loadDailyData` para semana |
+| Componentes | Reutiliza ChartContainer e BarChart existentes |
+| Legenda | Manual com divs (simples, sem dependencias) |
 
 ---
 
-## Exemplo de Experiencia do Usuario
+## Resultado Visual Esperado
 
 ```text
-1. Usuario abre o dashboard pela primeira vez:
-   [Carregando...] -> Busca do Supabase -> Salva localmente
-   Tempo: ~1-2s
++-----------------------------------------------+
+|          Evolucao de Vendas                   |
+|  [ANO] [SEMANA] [MES]                         |
+|                                               |
+|  ANO [2026 v]  comparado com 2025             |
+|  [■] 2026 (atual)  [□] 2025 (anterior)        |
+|                                               |
+|  [===== GRAFICO BARRAS 12 MESES =====]        |
++-----------------------------------------------+
 
-2. Usuario abre o dashboard na segunda vez:
-   [Dados aparecem INSTANTANEAMENTE] -> Background verifica atualizacoes
-   Tempo: < 100ms
-
-3. Usuario abre offline:
-   [Dados locais] + Badge "Modo Offline"
-   Tempo: < 100ms
++----------------------+------------------------+
+| Ranking Vendedores   | Produtos Mais Vendidos |
+| 1. Fulano R$ 50K     | 1. Produto A  120 un   |
+| 2. Ciclano R$ 45K    | 2. Produto B  98 un    |
++----------------------+------------------------+
 ```
-
-Isso proporcionara uma experiencia similar ao Power BI, onde os dados aparecem imediatamente ao abrir o aplicativo.
