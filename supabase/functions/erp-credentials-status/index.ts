@@ -17,6 +17,33 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // JWT verification - require authenticated user
+  const authHeader = req.headers.get('Authorization') ?? req.headers.get('authorization');
+  if (!authHeader) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Unauthorized - Missing authorization header' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length).trim() : authHeader.trim();
+
+  const authSupabase = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+  );
+
+  const { data: claimsData, error: authError } = await authSupabase.auth.getClaims(token);
+  if (authError || !claimsData?.claims) {
+    console.error('[ERP-STATUS] Auth error:', authError?.message);
+    return new Response(
+      JSON.stringify({ success: false, error: 'Unauthorized - Invalid token' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  console.log('[ERP-STATUS] Authenticated user:', claimsData.claims.sub);
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 

@@ -408,6 +408,33 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // JWT verification - require authenticated user
+  const authHeader = req.headers.get('Authorization') ?? req.headers.get('authorization');
+  if (!authHeader) {
+    return new Response(
+      JSON.stringify({ error: 'Unauthorized - Missing authorization header' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length).trim() : authHeader.trim();
+
+  const supabaseClient = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+  );
+
+  const { data: claimsData, error: authError } = await supabaseClient.auth.getClaims(token);
+  if (authError || !claimsData?.claims) {
+    console.error('[ERP] Auth error:', authError?.message);
+    return new Response(
+      JSON.stringify({ error: 'Unauthorized - Invalid token' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  console.log('[ERP] Authenticated user:', claimsData.claims.sub);
+
   // ERP API base URL - hardcoded
   const erpBaseUrl = 'https://api.hoteltarobafoz.com.br/erp-json';
 
