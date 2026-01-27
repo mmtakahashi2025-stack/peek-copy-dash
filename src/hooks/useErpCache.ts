@@ -2,6 +2,7 @@ import { useCallback, useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { RawSaleRow } from '@/contexts/SheetDataContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useUserRole } from '@/hooks/useUserRole';
 
 // Cache configuration
 const MAX_CACHE_AGE_HOURS = 24;
@@ -37,6 +38,7 @@ function isMonthWithinRefreshRange(year: number, month: number, monthsToRefresh:
 
 export function useErpCache() {
   const { user } = useAuth();
+  const { isAdmin } = useUserRole();
   const [cacheMeta, setCacheMeta] = useState<CacheMeta>({
     totalEntries: 0,
     totalSizeMB: 0,
@@ -46,7 +48,7 @@ export function useErpCache() {
   });
   const [isLoading, setIsLoading] = useState(false);
 
-  // Load cache metadata from Supabase
+  // Load cache metadata from Supabase (global cache - no user_id filter)
   const updateCacheMeta = useCallback(async () => {
     if (!user) {
       setCacheMeta({
@@ -63,7 +65,6 @@ export function useErpCache() {
       const { data, error } = await supabase
         .from('erp_cache')
         .select('year, month, record_count, created_at, updated_at')
-        .eq('user_id', user.id)
         .order('year', { ascending: true })
         .order('month', { ascending: true });
 
@@ -107,7 +108,7 @@ export function useErpCache() {
     updateCacheMeta();
   }, [updateCacheMeta]);
 
-  // Load a single month from Supabase cache
+  // Load a single month from Supabase cache (global cache - no user_id filter)
   const loadMonthFromCache = useCallback(async (year: number, month: number): Promise<MonthlyCacheEntry | null> => {
     if (!user) return null;
 
@@ -115,7 +116,6 @@ export function useErpCache() {
       const { data, error } = await supabase
         .from('erp_cache')
         .select('data, record_count, updated_at')
-        .eq('user_id', user.id)
         .eq('year', year)
         .eq('month', month)
         .maybeSingle();
@@ -157,9 +157,15 @@ export function useErpCache() {
     }
   }, [user]);
 
-  // Save a single month to Supabase cache using upsert to avoid duplicate key errors
+  // Save a single month to Supabase cache using upsert (only admins can write)
   const saveMonthToCache = useCallback(async (year: number, month: number, data: RawSaleRow[]): Promise<boolean> => {
     if (!user) return false;
+    
+    // Only admins can write to cache
+    if (!isAdmin) {
+      console.log('[Cache] Non-admin user cannot write to cache');
+      return false;
+    }
 
     try {
       // Validate data before saving
@@ -173,14 +179,14 @@ export function useErpCache() {
       const { error } = await (supabase
         .from('erp_cache') as any)
         .upsert({
-          user_id: user.id,
+          user_id: user.id, // Records who last updated
           year,
           month,
           data: data,
           record_count: data.length,
           updated_at: new Date().toISOString(),
         }, {
-          onConflict: 'user_id,year,month',
+          onConflict: 'year,month',
         });
 
       if (error) {
@@ -195,7 +201,7 @@ export function useErpCache() {
       console.error(`[Cache] Unexpected error saving month ${year}-${month}:`, error);
       return false;
     }
-  }, [user]);
+  }, [user, isAdmin]);
 
   // Check if a specific month is cached and valid
   const isMonthCached = useCallback(async (year: number, month: number): Promise<boolean> => {
@@ -309,9 +315,15 @@ export function useErpCache() {
     }
   }, [user, getMonthData]);
 
-  // Set cached data (splits into monthly caches)
+  // Set cached data (splits into monthly caches) - only admins can write
   const setCachedData = useCallback(async (dateFrom: Date, dateTo: Date, data: RawSaleRow[]): Promise<void> => {
     if (!user) return;
+    
+    // Only admins can write to cache
+    if (!isAdmin) {
+      console.log('[Cache] Non-admin user cannot write to cache');
+      return;
+    }
     
     setIsLoading(true);
     
@@ -362,7 +374,7 @@ export function useErpCache() {
       }
       
       // Update consolidated cache metadata
-      if (user) {
+      if (user && isAdmin) {
         const uniqueSales = new Set(data.map(row => row['Venda #'])).size;
         const totalRevenue = data.reduce((sum, row) => sum + (row['Líquido'] || 0), 0);
         
@@ -376,7 +388,7 @@ export function useErpCache() {
             total_revenue: totalRevenue,
             total_records: data.length,
           }, {
-            onConflict: 'user_id',
+            onConflict: 'start_date,end_date',
           });
       }
       
@@ -384,7 +396,7 @@ export function useErpCache() {
     } finally {
       setIsLoading(false);
     }
-  }, [user, setMonthData]);
+  }, [user, isAdmin, setMonthData]);
 
   // Get months that need to be refreshed for a date range
   const getMonthsToRefresh = useCallback(async (dateFrom: Date, dateTo: Date): Promise<{ year: number; month: number; label: string }[]> => {
@@ -452,9 +464,15 @@ export function useErpCache() {
     return cachedMonths;
   }, [monthNeedsRefresh, getMonthData]);
 
-  // Clear all cache for current user
+  // Clear all cache (only admins can clear)
   const clearAllCache = useCallback(async () => {
     if (!user) return;
+    
+    // Only admins can clear cache
+    if (!isAdmin) {
+      console.log('[Cache] Non-admin user cannot clear cache');
+      return;
+    }
     
     setIsLoading(true);
     
@@ -462,7 +480,7 @@ export function useErpCache() {
       const { error: cacheError } = await supabase
         .from('erp_cache')
         .delete()
-        .eq('user_id', user.id);
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all rows
         
       if (cacheError) {
         console.error('[Cache] Error clearing cache:', cacheError);
@@ -471,7 +489,7 @@ export function useErpCache() {
       const { error: consolidatedError } = await supabase
         .from('erp_consolidated_cache')
         .delete()
-        .eq('user_id', user.id);
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all rows
         
       if (consolidatedError) {
         console.error('[Cache] Error clearing consolidated cache:', consolidatedError);
@@ -482,9 +500,9 @@ export function useErpCache() {
     } finally {
       setIsLoading(false);
     }
-  }, [user, updateCacheMeta]);
+  }, [user, isAdmin, updateCacheMeta]);
 
-  // Get cache info for display
+  // Get cache info for display (global cache)
   const getCacheInfo = useCallback(async (dateFrom: Date, dateTo: Date): Promise<{ isCached: boolean; cachedAt: Date | null; recordCount: number }> => {
     if (!user) {
       return { isCached: false, cachedAt: null, recordCount: 0 };
@@ -494,7 +512,6 @@ export function useErpCache() {
       const { data, error } = await supabase
         .from('erp_consolidated_cache')
         .select('updated_at, total_records')
-        .eq('user_id', user.id)
         .maybeSingle();
         
       if (error || !data) {
@@ -536,6 +553,8 @@ export function useErpCache() {
     getMonthsToRefresh,
     getCachedMonths,
     isMonthWithinRefreshRange,
+    // Admin status
+    isAdmin,
     // Constants
     maxCacheAgeHours: MAX_CACHE_AGE_HOURS,
     maxCacheSizeMB: Infinity, // No limit with Supabase

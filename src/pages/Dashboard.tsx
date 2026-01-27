@@ -25,7 +25,7 @@ interface Filters {
 }
 
 export default function Dashboard() {
-  const { rawData, isLoading, isConnected, getKpis, getColaboradores, getProdutos, fetchExcellencePercentage, fetchLeadsTotal, loadErpData, cancelLoading, erpCredentials, refreshErpCredentials, loadingProgress } = useSheetData();
+  const { rawData, isLoading, isConnected, getKpis, getColaboradores, getProdutos, fetchExcellencePercentage, fetchLeadsTotal, loadErpData, cancelLoading, erpCredentials, refreshErpCredentials, loadingProgress, isAdmin: isAdminFromContext } = useSheetData();
   const { isAdmin } = useUserRole();
   
   const [filters, setFilters] = useState<Filters>({
@@ -56,17 +56,19 @@ export default function Dashboard() {
   }, []);
 
   // Auto-load ERP data on mount if credentials are available and not already loaded
+  // Only admin can trigger API fetch; non-admin will only see cached data
   useEffect(() => {
     if (
       !initialLoadDone && 
       !isLoading && 
       !isConnected && 
-      erpCredentials?.hasPassword
+      erpCredentials?.hasPassword &&
+      isAdmin
     ) {
       setInitialLoadDone(true);
       loadErpData(filters.dateFrom, filters.dateTo);
     }
-  }, [initialLoadDone, isLoading, isConnected, erpCredentials?.hasPassword, loadErpData, filters.dateFrom, filters.dateTo]);
+  }, [initialLoadDone, isLoading, isConnected, erpCredentials?.hasPassword, isAdmin, loadErpData, filters.dateFrom, filters.dateTo]);
 
   // Fetch KPIs when filters change
   useEffect(() => {
@@ -110,12 +112,12 @@ export default function Dashboard() {
     fetchKpis();
   }, [filters.filial, filters.dateFrom, filters.dateTo, getKpis, fetchExcellencePercentage, fetchLeadsTotal]);
 
-  // Reload data when date filters change
+  // Reload data when date filters change (only for admin)
   useEffect(() => {
-    if (isConnected && filters.dateFrom && filters.dateTo) {
+    if (isConnected && filters.dateFrom && filters.dateTo && isAdmin) {
       loadErpData(filters.dateFrom, filters.dateTo);
     }
-  }, [filters.dateFrom, filters.dateTo]);
+  }, [filters.dateFrom, filters.dateTo, isAdmin]);
 
   const colaboradores = useMemo(
     () => getColaboradores(filters.filial, filters.colaborador),
@@ -152,6 +154,19 @@ export default function Dashboard() {
             {isAdmin && (
               <SystemSettingsDialog triggerClassName="gap-2" />
             )}
+          </div>
+        )}
+
+        {/* No Data Warning for Non-Admin */}
+        {!isAdmin && !isLoading && !hasData && erpCredentials?.hasPassword && (
+          <div className="flex items-center gap-3 p-4 bg-muted/50 border border-border text-muted-foreground rounded-xl">
+            <KeyRound className="h-5 w-5 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="font-medium">Aguardando dados do ERP</p>
+              <p className="text-sm opacity-80">
+                O administrador precisa carregar os dados do ERP para que você possa visualizá-los.
+              </p>
+            </div>
           </div>
         )}
 

@@ -142,6 +142,7 @@ interface SheetDataContextType {
   erpCredentials: UserErpCredentials | null;
   cacheMeta: CacheMeta;
   loadingProgress: LoadingProgressState;
+  isAdmin: boolean;
   getKpis: (filialId: string, dateFilter?: DateFilter, leadsRecebidos?: number) => KpiData[];
   getColaboradores: (filialId: string, colaboradorId?: string) => ColaboradorData[];
   getEvolucao: () => EvolucaoData[];
@@ -237,6 +238,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     getCachedMonths,
     setMonthData,
     monthsToRefresh: MONTHS_TO_REFRESH_CONFIG,
+    isAdmin: isAdminFromCache,
   } = useErpCache();
 
   // Fetch system-wide ERP credentials (configured by admin)
@@ -1090,6 +1092,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       erpCredentials,
       cacheMeta,
       loadingProgress,
+      isAdmin: isAdminFromCache,
       getKpis,
       getColaboradores,
       getEvolucao,
