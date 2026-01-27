@@ -72,7 +72,7 @@ export function DashboardHeader() {
                 <SystemSettingsDialog />
               </>
             )}
-            <SheetConfigDialog />
+            {isAdmin && <SheetConfigDialog />}
             <span className="text-sm text-muted-foreground">
               {user?.email}
             </span>
@@ -132,7 +132,7 @@ export function DashboardHeader() {
                 
                 <div className="border-t my-4" />
                 
-                <SheetConfigDialog />
+                {isAdmin && <SheetConfigDialog />}
                 
                 <div className="border-t my-4" />
                 

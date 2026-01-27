@@ -62,13 +62,12 @@ export default function Dashboard() {
       !initialLoadDone && 
       !isLoading && 
       !isConnected && 
-      erpCredentials?.hasPassword &&
-      isAdmin
+      erpCredentials?.hasPassword
     ) {
       setInitialLoadDone(true);
       loadErpData(filters.dateFrom, filters.dateTo);
     }
-  }, [initialLoadDone, isLoading, isConnected, erpCredentials?.hasPassword, isAdmin, loadErpData, filters.dateFrom, filters.dateTo]);
+  }, [initialLoadDone, isLoading, isConnected, erpCredentials?.hasPassword, loadErpData, filters.dateFrom, filters.dateTo]);
 
   // Fetch KPIs when filters change
   useEffect(() => {
@@ -112,12 +111,12 @@ export default function Dashboard() {
     fetchKpis();
   }, [filters.filial, filters.dateFrom, filters.dateTo, getKpis, fetchExcellencePercentage, fetchLeadsTotal]);
 
-  // Reload data when date filters change (only for admin)
+  // Reload data when date filters change
   useEffect(() => {
-    if (isConnected && filters.dateFrom && filters.dateTo && isAdmin) {
+    if (isConnected && filters.dateFrom && filters.dateTo) {
       loadErpData(filters.dateFrom, filters.dateTo);
     }
-  }, [filters.dateFrom, filters.dateTo, isAdmin]);
+  }, [filters.dateFrom, filters.dateTo]);
 
   const colaboradores = useMemo(
     () => getColaboradores(filters.filial, filters.colaborador),
