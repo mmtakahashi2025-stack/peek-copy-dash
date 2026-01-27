@@ -1,91 +1,106 @@
 
-Contexto do problema (diagnóstico)
-- Hoje a importação de Leads chama a função `fetch-sheets` apenas com a URL da planilha, sem indicar qual aba (mês) deve ser lida.
-- Quando você exporta um Google Sheets como CSV, ele normalmente exporta somente 1 aba (geralmente a “primeira”/aba ativa), não “todas as abas”.
-- Além disso, mesmo quando a importação grava no banco, a tela `/leads` carrega os registros só uma vez ao abrir a página; se você importar com a página já aberta, pode não atualizar automaticamente.
+# Plano: Importar Abas de Período Multi-Ano
 
-Objetivo
-1) Permitir importar Leads por aba (mês) corretamente (cada mês é uma aba).
-2) Permitir “Importar todas as abas de mês” em um clique.
-3) Garantir que a página `/leads` reflita a importação imediatamente (sem precisar dar F5) e que o seletor de ano inclua anos existentes nos dados.
+## Problema Atual
+A função `generateTabNames` gera apenas os 12 meses de um único ano selecionado (ex: JANEIRO 2025 até DEZEMBRO 2025). Sua planilha tem abas que cruzam anos:
+- JULHO 2025, AGOSTO 2025, ..., DEZEMBRO 2025
+- JANEIRO 2026
 
-Escopo de alterações (arquivos)
-- `supabase/functions/fetch-sheets/index.ts`
-  - Melhorar suporte a seleção de aba:
-    - Aceitar “nome da aba” (ex.: `LEADS JULHO`) e gerar URL de export por nome.
-    - Continuar aceitando `gid` numérico (para compatibilidade), e também tentar extrair `gid` do próprio link quando o usuário colar um link com `#gid=...`.
-- `src/components/dashboard/SystemSettingsDialog.tsx`
-  - Evoluir UI do importador:
-    - Modo “Uma aba” e modo “Todas as abas (meses)”.
-    - Campo opcional para “prefixo do nome das abas” (default: `LEADS`) e/ou lista customizada de abas.
-    - Progresso por aba + resumo final (quantos registros por aba, quais falharam).
-- `src/pages/Leads.tsx`
-  - Atualizar automaticamente após importação:
-    - Escutar um evento simples disparado pelo importador e rodar `loadRecords()` de novo.
-  - Melhorar filtro de ano:
-    - Em vez de limitar a “ano atual ±2”, montar opções com base nos anos realmente presentes em `lead_records` (e incluir o ano atual também).
+## Solução Proposta
+Trocar a lógica de "selecionar um ano" para "selecionar mês/ano inicial e final", gerando automaticamente a lista de abas do intervalo.
 
-Detalhamento da solução
+## Alterações
 
-1) Backend function `fetch-sheets`: ler aba por nome (e/ou gid)
-- Problema atual: o parâmetro `sheetName` está sendo usado como `gid`, mas na prática “gid” é um número e vocês trabalham com “nome da aba” (ex.: `LEADS JULHO`).
-- Ajuste proposto (compatível):
-  - Se receber `sheetName` e ele for numérico (ex.: `"123456789"`), continuar usando `export?format=csv&gid=...`.
-  - Se receber `sheetName` e ele for texto (ex.: `"LEADS JULHO"`), usar o endpoint de export por nome de aba, por exemplo no formato CSV (mantendo host `docs.google.com` para continuar seguro).
-  - Se o usuário colar um link que contém `#gid=...` e não passar `sheetName`, tentar extrair esse `gid` do link automaticamente.
-- Resultado: conseguimos buscar uma aba específica por mês, sem depender de API keys.
+### Arquivo: `src/components/dashboard/LeadsImportSection.tsx`
 
-2) SystemSettingsDialog: importar “todas as abas (meses)”
-- UI/UX
-  - Adicionar um seletor de modo:
-    - “Importar uma aba (mês)”
-    - “Importar todas as abas (meses)”
-  - Quando “todas as abas” estiver ativo:
-    - Opção de prefixo (default `LEADS`)
-    - Opção de “usar meses em maiúsculo” (porque na sua planilha está `LEADS JULHO`, `LEADS AGOSTO`, etc.)
-    - Opcional: campo “lista de abas” (caso existam nomes fora do padrão)
-- Lógica
-  - Construir uma lista de abas-alvo:
-    - Padrão: `LEADS JANEIRO` ... `LEADS DEZEMBRO` (ou conforme o padrão escolhido)
-  - Para cada aba:
-    - Chamar `fetch-sheets` passando `{ sheetUrl, sheetName: "<NOME_DA_ABA>" }`
-    - Processar as linhas como hoje (coluna `VENDEDOR` + colunas de datas `DD/MM/AAAA`)
-    - Fazer upsert em lotes de 100
-  - Mostrar progresso:
-    - “Importando: LEADS JULHO (3/12) …”
-    - No final, mostrar um resumo: importado por aba + abas que falharam (por exemplo, se um mês não existir no arquivo).
-- Importante: manter o comportamento atual “Importar Planilha” para quem quiser importar somente uma aba.
+1. **Novos estados para período**
+   - `startMonth` / `startYear`: Mês e ano inicial (ex: Julho 2025)
+   - `endMonth` / `endYear`: Mês e ano final (ex: Janeiro 2026)
 
-3) Leads.tsx: refletir importação imediatamente
-- Adicionar listener de evento (ex.: `lead_records_changed`) para chamar `loadRecords()` novamente.
-- Ao finalizar a importação no SystemSettingsDialog, disparar esse evento.
-- Ajustar `yearOptions`:
-  - Derivar anos diretamente de `records` (anos existentes) + ano atual, ordenados.
+2. **Nova função `generateTabNamesForRange`**
+   - Recebe: mês/ano inicial, mês/ano final, padrão de nomenclatura
+   - Itera de mês/ano inicial até mês/ano final
+   - Retorna: `["JULHO 2025", "AGOSTO 2025", ..., "DEZEMBRO 2025", "JANEIRO 2026"]`
+   
+   ```text
+   Exemplo de lógica:
+   startMonth=7, startYear=2025
+   endMonth=1, endYear=2026
+   
+   Resultado:
+   JULHO 2025 → AGOSTO 2025 → ... → DEZEMBRO 2025 → JANEIRO 2026
+   ```
 
-Testes (passo a passo)
-1) Na planilha, confirmar que cada aba tem:
-   - Coluna `VENDEDOR`
-   - Colunas de data no formato `DD/MM/AAAA` referentes àquele mês
-2) No app:
-   - Importar “uma aba” (ex.: `LEADS JULHO`) e confirmar que `/leads` atualiza sem F5.
-   - Importar “todas as abas” e confirmar que aparecem contagens em múltiplos meses/anos.
-3) Verificar no filtro da página `/leads`:
-   - Se o banco tiver 2025/2026, eles devem aparecer nas opções.
+3. **Atualização da UI**
+   - Quando padrão "MÊS ANO" estiver selecionado:
+     - Seção "Período inicial": Seletor de mês + seletor de ano
+     - Seção "Período final": Seletor de mês + seletor de ano
+   - Prévia das abas que serão importadas (ex: "7 abas: JULHO 2025 até JANEIRO 2026")
 
-Riscos e mitigação
-- Abas com nomes diferentes do padrão:
-  - Mitigação: permitir “lista customizada de abas” (separadas por vírgula/linha).
-- Planilha muito grande:
-  - Mitigação: manter lote de 100 no upsert e mostrar progresso.
-- CSV com vírgulas/aspas (parsing simples):
-  - Mitigação: manter como está (provavelmente suficiente para esse formato), e se aparecer erro real de parsing, evoluir o parser depois.
+4. **Validação**
+   - Garantir que data final não seja anterior à data inicial
+   - Mostrar erro amigável se o período for inválido
 
-Resultado esperado
-- Um clique importa todos os meses (abas) e cada registro cai no mês correto (pela data do cabeçalho).
-- A tela `/leads` atualiza automaticamente após a importação.
-- O filtro de ano não “esconde” anos importados.
+5. **Atualização do `handleImportAllTabs`**
+   - Usar `generateTabNamesForRange` em vez de `generateTabNames`
 
-Próximas melhorias possíveis (opcionais, depois)
-- Botão “Apagar e reimportar” (limpar período selecionado antes de importar, para evitar lixo histórico).
-- Mostrar “Prévia” antes de gravar (quantos registros por aba e por vendedor).
-- Realtime em `/leads` para refletir qualquer edição/importação instantaneamente (sem evento manual).
+## Fluxo Visual
+
+```text
+┌─────────────────────────────────────────────────┐
+│  Formato: MÊS ANO (ex: JULHO 2025)              │
+├─────────────────────────────────────────────────┤
+│  Período Inicial         Período Final          │
+│  ┌─────────┬──────┐     ┌─────────┬──────┐     │
+│  │ Julho ▼ │ 2025 │     │ Janeiro │ 2026 │     │
+│  └─────────┴──────┘     └─────────┴──────┘     │
+├─────────────────────────────────────────────────┤
+│  📋 7 abas serão importadas:                    │
+│  JULHO 2025 → JANEIRO 2026                      │
+└─────────────────────────────────────────────────┘
+```
+
+## Detalhes Técnicos
+
+A nova função de geração:
+
+```typescript
+const generateTabNamesForRange = (
+  startMonth: number, // 1-12
+  startYear: number,
+  endMonth: number,   // 1-12
+  endYear: number,
+  pattern: TabPattern,
+  prefix: string
+): string[] => {
+  const tabs: string[] = [];
+  let currentMonth = startMonth;
+  let currentYear = startYear;
+  
+  while (
+    currentYear < endYear || 
+    (currentYear === endYear && currentMonth <= endMonth)
+  ) {
+    const monthName = MONTHS_PT[currentMonth - 1];
+    
+    if (pattern === 'month-year') {
+      tabs.push(`${monthName} ${currentYear}`);
+    } else {
+      tabs.push(`${prefix} ${monthName}`);
+    }
+    
+    currentMonth++;
+    if (currentMonth > 12) {
+      currentMonth = 1;
+      currentYear++;
+    }
+  }
+  
+  return tabs;
+};
+```
+
+## Resultado Esperado
+- Usuário seleciona: Julho 2025 até Janeiro 2026
+- Sistema gera: `["JULHO 2025", "AGOSTO 2025", "SETEMBRO 2025", "OUTUBRO 2025", "NOVEMBRO 2025", "DEZEMBRO 2025", "JANEIRO 2026"]`
+- Importa todas as 7 abas corretamente
