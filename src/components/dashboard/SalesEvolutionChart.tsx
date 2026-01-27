@@ -8,6 +8,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 
 interface ChartConfig {
@@ -44,6 +45,40 @@ const formatCurrency = (value: number) => {
 
 const formatCurrencyFull = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+};
+
+// Custom tooltip content for annual comparison with trend indicators
+const AnnualTooltipContent = ({ active, payload, label }: any) => {
+  if (!active || !payload || payload.length < 2) return null;
+  
+  const atual = payload.find((p: any) => p.dataKey === 'faturamento')?.value || 0;
+  const anterior = payload.find((p: any) => p.dataKey === 'faturamentoAnterior')?.value || 0;
+  
+  const variacao = anterior > 0 ? ((atual - anterior) / anterior) * 100 : 0;
+  const isGrowth = atual > anterior;
+  const isDecline = atual < anterior;
+  
+  return (
+    <div className="bg-background border border-border/50 rounded-lg p-2.5 shadow-xl text-xs">
+      <p className="font-medium mb-1.5">{label}</p>
+      <div className="flex items-center gap-1.5">
+        {isGrowth && <TrendingUp className="h-3.5 w-3.5 text-success" />}
+        {isDecline && <TrendingDown className="h-3.5 w-3.5 text-destructive" />}
+        {!isGrowth && !isDecline && <Minus className="h-3.5 w-3.5 text-muted-foreground" />}
+        <span className={`font-medium ${isGrowth ? 'text-success' : isDecline ? 'text-destructive' : 'text-foreground'}`}>
+          {formatCurrencyFull(atual)}
+        </span>
+      </div>
+      <p className="text-muted-foreground mt-1">
+        {formatCurrencyFull(anterior)}
+      </p>
+      {anterior > 0 && (
+        <p className={`text-xs font-semibold mt-1 ${isGrowth ? 'text-success' : isDecline ? 'text-destructive' : 'text-muted-foreground'}`}>
+          {isGrowth ? '+' : ''}{variacao.toFixed(1)}%
+        </p>
+      )}
+    </div>
+  );
 };
 
 interface SalesEvolutionChartProps {
@@ -481,10 +516,7 @@ export function SalesEvolutionChart({
                       axisLine={false}
                       width={60}
                     />
-                    <ChartTooltip 
-                      content={<ChartTooltipContent />} 
-                      formatter={(value: number) => formatCurrencyFull(value)}
-                    />
+                    <ChartTooltip content={<AnnualTooltipContent />} />
                     <Bar 
                       dataKey="faturamentoAnterior" 
                       name={`${previousYear}`}
