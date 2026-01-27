@@ -1,46 +1,107 @@
 
-# Correção: Botão "Limpar" Cache Visível para Não-Admins
+# Ocultar Botoes Admin e Reorganizar Layout
 
-## Problema Identificado
+## Resumo das Alteracoes
 
-O botão "Limpar" está aparecendo para usuários não-admin mesmo após a alteração. Isso pode estar ocorrendo por dois motivos:
+1. **Ocultar botoes de cache e refresh para usuarios nao-admin**
+2. **Reorganizar modulos para ficarem lado a lado**
 
-1. **Race condition**: O hook `useUserRole` inicia com `isLoading: true` e `isAdmin: false`, mas durante a renderização inicial, o estado pode não estar sincronizado corretamente
-2. **Publicação pendente**: A alteração pode estar apenas no ambiente de preview e ainda não foi publicada para produção
+---
 
-## Solução
+## 1. Ocultar Botoes Admin-Only
 
-Adicionar verificação do estado de carregamento (`isLoading`) para garantir que o botão só apareça após confirmar que o usuário é realmente admin.
+**Arquivo:** `src/components/dashboard/DashboardFilters.tsx`
 
-## Alteração no Código
+### Botao de Refresh ERP (linhas 389-410)
+Envolver o botao `RefreshCw` em uma verificacao `isAdmin`:
 
-**Arquivo:** `src/components/dashboard/CacheInfoButton.tsx`
-
-**Linha 15 - Adicionar `isLoading`:**
 ```tsx
-const { isAdmin, isLoading } = useUserRole();
+// Antes (linhas 389-410): Visivel para todos
+<TooltipProvider>
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <Button variant="outline" size="icon" onClick={...}>
+        <RefreshCw className="h-4 w-4" />
+      </Button>
+    </TooltipTrigger>
+    ...
+  </Tooltip>
+</TooltipProvider>
+
+// Depois: Apenas para admin
+{isAdmin && (
+  <TooltipProvider>
+    <Tooltip>
+      ...
+    </Tooltip>
+  </TooltipProvider>
+)}
 ```
 
-**Linha 72 - Adicionar verificação de loading:**
+### Botao de Cache (linha 413)
+Envolver o `CacheInfoButton` em verificacao `isAdmin`:
+
 ```tsx
-{!isLoading && isAdmin && cacheMeta.totalEntries > 0 && (
+// Antes
+<CacheInfoButton />
+
+// Depois
+{isAdmin && <CacheInfoButton />}
 ```
 
-## Lógica
+---
 
-| Situação | isLoading | isAdmin | Botão Aparece |
-|----------|-----------|---------|---------------|
-| Carregando | true | false | Não |
-| Usuário admin | false | true | Sim |
-| Usuário não-admin | false | false | Não |
-| Usuário sem role | false | false | Não |
+## 2. Reorganizar Layout dos Modulos
 
-## Verificação Adicional
+**Objetivo:** Colocar os tres modulos (Evolucao de Vendas, Ranking Colaboradores, Produtos Mais Vendidos) lado a lado em telas grandes.
 
-Confirmado no banco de dados:
-- Apenas `jonasmachtk@gmail.com` tem role `admin`
-- O usuário `agencia5@grupotaroba.com.br` **não possui registro** na tabela `user_roles`, portanto `isAdmin = false`
+### Alteracoes Necessarias
 
-## Próximo Passo
+**Arquivo:** `src/components/dashboard/SalesEvolutionChart.tsx`
 
-Após implementar a correção, será necessário **publicar** a aplicação para que as mudanças reflitam no ambiente de produção.
+| Linha | Antes | Depois |
+|-------|-------|--------|
+| 193 | `lg:col-span-2` | `lg:col-span-1` |
+| 205, 227, 279, 312 | `h-[300px]` / `h-[240px]` | `h-[280px]` / `h-[220px]` |
+
+**Arquivo:** `src/pages/Dashboard.tsx`
+
+A grid atual `grid-cols-1 lg:grid-cols-3` ja suporta 3 colunas. Com o chart usando apenas 1 coluna, os tres modulos ficarao lado a lado automaticamente.
+
+---
+
+## Visualizacao do Layout
+
+**Antes (Grid 3 colunas):**
+```text
++---------------------+---------------------+---------------------+
+|     Evolucao de Vendas (col-span-2)       |    Ranking          |
++---------------------+---------------------+---------------------+
+|     Produtos                              |                     |
++-------------------------------------------+---------------------+
+```
+
+**Depois (Grid 3 colunas):**
+```text
++---------------+---------------+---------------+
+|   Evolucao    |    Ranking    |   Produtos    |
+|   de Vendas   | Colaboradores | Mais Vendidos |
++---------------+---------------+---------------+
+```
+
+---
+
+## Arquivos a Modificar
+
+| Arquivo | Alteracao |
+|---------|-----------|
+| `src/components/dashboard/DashboardFilters.tsx` | Envolver `RefreshCw` e `CacheInfoButton` em `{isAdmin && ...}` |
+| `src/components/dashboard/SalesEvolutionChart.tsx` | Mudar `lg:col-span-2` para `lg:col-span-1`, ajustar alturas |
+
+---
+
+## Resultado Esperado
+
+- Usuarios **nao-admin** nao verao os botoes de cache e refresh do ERP
+- Os tres modulos (grafico + 2 rankings) aparecerao **lado a lado** em telas grandes
+- Em telas menores (mobile/tablet), os modulos continuarao empilhados verticalmente
