@@ -12,6 +12,10 @@ import {
   getLocalCacheStats,
   isIndexedDBAvailable,
   calculateChecksum,
+  pruneOldLocalMonths,
+  getLocalCacheRetention,
+  setLocalCacheRetention as setLocalRetentionPref,
+  DEFAULT_MAX_LOCAL_MONTHS,
 } from '@/lib/indexeddb';
 
 // Cache configuration
@@ -460,9 +464,13 @@ export function useErpCache() {
     if (success) {
       // Also save to local IndexedDB for instant access next time
       if (isIndexedDBAvailable()) {
-        setLocalMonthData(year, month, data).catch(err => {
+        await setLocalMonthData(year, month, data).catch(err => {
           console.warn(`[Cache] Failed to save ${year}-${month} to IndexedDB:`, err);
         });
+        
+        // Prune old months automatically based on user's retention preference
+        const retention = getLocalCacheRetention();
+        await pruneOldLocalMonths(retention);
         
         // Update local stats
         const stats = await getLocalCacheStats();
@@ -480,6 +488,31 @@ export function useErpCache() {
     }
     return success;
   }, [saveMonthToCache, updateCacheMeta, calculateAndSaveAggregates]);
+  
+  // Update local cache retention preference and prune if needed
+  const updateLocalRetention = useCallback(async (months: number): Promise<void> => {
+    setLocalRetentionPref(months);
+    
+    if (isIndexedDBAvailable()) {
+      const prunedCount = await pruneOldLocalMonths(months);
+      
+      // Update stats after pruning
+      const stats = await getLocalCacheStats();
+      setLocalCacheStats({
+        totalRecords: stats.totalRecords,
+        totalMonths: stats.totalMonths,
+        totalSizeEstimateMB: stats.totalSizeEstimateMB,
+        isAvailable: true,
+      });
+      
+      if (prunedCount > 0) {
+        console.log(`[Cache] Pruned ${prunedCount} months after retention change to ${months}`);
+      }
+    }
+  }, []);
+  
+  // Get current retention preference
+  const localRetention = getLocalCacheRetention();
 
   // Get all cached data for a date range (combines monthly caches)
   const getCachedData = useCallback(async (dateFrom: Date, dateTo: Date): Promise<RawSaleRow[] | null> => {
@@ -803,8 +836,10 @@ export function useErpCache() {
     getMonthsToRefresh,
     getCachedMonths,
     isMonthWithinRefreshRange,
-    // Local cache stats
+    // Local cache stats and retention
     localCacheStats,
+    localRetention,
+    updateLocalRetention,
     // Admin status
     isAdmin,
     // Constants
