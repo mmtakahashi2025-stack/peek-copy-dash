@@ -6,11 +6,13 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { useSheetData } from '@/contexts/SheetDataContext';
+import { useUserRole } from '@/hooks/useUserRole';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 
 export function CacheInfoButton() {
   const { cacheMeta, clearCache } = useSheetData();
+  const { isAdmin } = useUserRole();
 
   const handleClearCache = async () => {
     await clearCache();
@@ -67,7 +69,7 @@ export function CacheInfoButton() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h4 className="font-semibold text-sm">Cache Supabase (por mês)</h4>
-            {cacheMeta.totalEntries > 0 && (
+            {isAdmin && cacheMeta.totalEntries > 0 && (
               <Button 
                 variant="destructive" 
                 size="sm" 
