@@ -1,143 +1,176 @@
 
+# Cache Global de ERP: Admin Busca, Todos Visualizam
 
-# Alteracao do Grafico de Evolucao de Vendas: Seletor de Ano com Comparativo
+## Resumo
 
-## Resumo da Mudanca
-
-Substituir a aba "Ultimos 12 Meses" por uma aba "Anual" com seletor de ano, onde o usuario pode escolher qualquer ano disponivel e visualizar o faturamento mensal daquele ano comparado com o ano anterior.
+Alterar a arquitetura de cache do ERP para que:
+1. **Apenas admins** possam buscar dados da API do ERP
+2. **Todos os usuarios autenticados** possam visualizar o mesmo cache global
+3. Eliminar dados duplicados (atualmente 3 usuarios com caches separados)
 
 ---
 
-## Alteracoes Detalhadas
+## Alteracoes Necessarias
 
-### Arquivo: `src/components/dashboard/SalesEvolutionChart.tsx`
+### 1. Migracao de Banco de Dados
 
-#### 1. Adicionar Estado para Ano Selecionado na Aba Anual
+**Objetivo:** Remover a restricao por `user_id` e tornar o cache global.
 
-```typescript
-// Linha ~101: Adicionar novo estado para o ano da aba anual
-const [selectedYearForAnnual, setSelectedYearForAnnual] = useState(new Date().getFullYear());
-```
+```sql
+-- Remover constraint unique atual (user_id, year, month)
+ALTER TABLE erp_cache DROP CONSTRAINT IF EXISTS erp_cache_user_id_year_month_key;
 
-#### 2. Substituir `last12MonthsData` por `yearlyComparisonData`
+-- Adicionar nova constraint unique sem user_id
+ALTER TABLE erp_cache ADD CONSTRAINT erp_cache_year_month_key UNIQUE (year, month);
 
-A logica muda de "ultimos 12 meses rolantes" para "todos os 12 meses do ano selecionado":
+-- Tornar user_id opcional (registra quem fez a ultima atualizacao)
+ALTER TABLE erp_cache ALTER COLUMN user_id DROP NOT NULL;
 
-```typescript
-// Faturamento do ano selecionado com comparativo do ano anterior
-const yearlyComparisonData = useMemo(() => {
-  const filialFiltered = filialId === 'todas' 
-    ? rawData 
-    : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
+-- Fazer o mesmo para erp_consolidated_cache
+ALTER TABLE erp_consolidated_cache DROP CONSTRAINT IF EXISTS erp_consolidated_cache_user_id_key;
+ALTER TABLE erp_consolidated_cache ADD CONSTRAINT erp_consolidated_cache_dates_key 
+  UNIQUE (start_date, end_date);
+ALTER TABLE erp_consolidated_cache ALTER COLUMN user_id DROP NOT NULL;
 
-  // Gerar os 12 meses do ano selecionado
-  const months = meses.map((mes, index) => ({
-    month: index,
-    label: mes,
-  }));
+-- Atualizar RLS policies
+DROP POLICY IF EXISTS "Users can view own erp_cache" ON erp_cache;
+DROP POLICY IF EXISTS "Users can insert own erp_cache" ON erp_cache;
+DROP POLICY IF EXISTS "Users can update own erp_cache" ON erp_cache;
+DROP POLICY IF EXISTS "Users can delete own erp_cache" ON erp_cache;
 
-  // Agrupar faturamento por ano-mes
-  const monthlyFaturamento: { [key: string]: number } = {};
-  
-  filialFiltered.forEach(row => {
-    const rowDate = parseRowDate(row['Data Venda']);
-    if (!rowDate || isNaN(rowDate.getTime())) return;
-    
-    const key = `${rowDate.getFullYear()}-${rowDate.getMonth()}`;
-    if (row.Tipo !== 'PC') {
-      monthlyFaturamento[key] = (monthlyFaturamento[key] || 0) + (row.Líquido || 0);
-    }
-  });
+-- Novas policies: todos leem, apenas admin escreve
+CREATE POLICY "Authenticated users can read erp_cache" 
+  ON erp_cache FOR SELECT TO authenticated USING (true);
 
-  // Retornar dados com comparativo do ano anterior
-  return months.map(m => {
-    const currentKey = `${selectedYearForAnnual}-${m.month}`;
-    const previousKey = `${selectedYearForAnnual - 1}-${m.month}`;
-    
-    return {
-      mes: m.label,
-      faturamento: Math.round(monthlyFaturamento[currentKey] || 0),
-      faturamentoAnterior: Math.round(monthlyFaturamento[previousKey] || 0),
-    };
-  });
-}, [rawData, filialId, selectedYearForAnnual]);
-```
+CREATE POLICY "Admins can insert erp_cache" 
+  ON erp_cache FOR INSERT TO authenticated 
+  WITH CHECK (has_role(auth.uid(), 'admin'));
 
-#### 3. Atualizar a UI da Aba Anual
+CREATE POLICY "Admins can update erp_cache" 
+  ON erp_cache FOR UPDATE TO authenticated 
+  USING (has_role(auth.uid(), 'admin'));
 
-Substituir o conteudo da aba "12meses" para incluir o seletor de ano:
+CREATE POLICY "Admins can delete erp_cache" 
+  ON erp_cache FOR DELETE TO authenticated 
+  USING (has_role(auth.uid(), 'admin'));
 
-```typescript
-{/* Aba Anual - nome da aba mostra o ano selecionado */}
-<TabsTrigger value="anual">{selectedYearForAnnual}</TabsTrigger>
+-- Mesma logica para erp_consolidated_cache
+DROP POLICY IF EXISTS "Users can view own erp_consolidated_cache" ON erp_consolidated_cache;
+DROP POLICY IF EXISTS "Users can insert own erp_consolidated_cache" ON erp_consolidated_cache;
+DROP POLICY IF EXISTS "Users can update own erp_consolidated_cache" ON erp_consolidated_cache;
+DROP POLICY IF EXISTS "Users can delete own erp_consolidated_cache" ON erp_consolidated_cache;
 
-<TabsContent value="anual" className="h-[300px]">
-  {/* Seletor de Ano */}
-  <div className="flex items-center gap-2 mb-4">
-    <Select 
-      value={String(selectedYearForAnnual)} 
-      onValueChange={(v) => setSelectedYearForAnnual(parseInt(v))}
-    >
-      <SelectTrigger className="w-[100px] h-8">
-        <SelectValue placeholder="Ano" />
-      </SelectTrigger>
-      <SelectContent>
-        {yearOptions.map((year) => (
-          <SelectItem key={year} value={String(year)}>{year}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-    <span className="text-sm text-muted-foreground">
-      vs {selectedYearForAnnual - 1}
-    </span>
-  </div>
-  
-  {/* Grafico com altura ajustada */}
-  <div className="h-[240px]">
-    {/* BarChart com duas barras comparativas */}
-  </div>
-</TabsContent>
-```
+CREATE POLICY "Authenticated users can read erp_consolidated_cache" 
+  ON erp_consolidated_cache FOR SELECT TO authenticated USING (true);
 
-#### 4. Atualizar Verificacao de Dados
+CREATE POLICY "Admins can insert erp_consolidated_cache" 
+  ON erp_consolidated_cache FOR INSERT TO authenticated 
+  WITH CHECK (has_role(auth.uid(), 'admin'));
 
-```typescript
-// Atualizar de hasLast12MonthsData para hasYearlyData
-const hasYearlyData = yearlyComparisonData.some(d => d.faturamento > 0 || d.faturamentoAnterior > 0);
+CREATE POLICY "Admins can update erp_consolidated_cache" 
+  ON erp_consolidated_cache FOR UPDATE TO authenticated 
+  USING (has_role(auth.uid(), 'admin'));
+
+CREATE POLICY "Admins can delete erp_consolidated_cache" 
+  ON erp_consolidated_cache FOR DELETE TO authenticated 
+  USING (has_role(auth.uid(), 'admin'));
+
+-- Limpar dados duplicados (manter apenas o mais recente de cada mes)
+DELETE FROM erp_cache a
+USING erp_cache b
+WHERE a.id < b.id 
+  AND a.year = b.year 
+  AND a.month = b.month;
+
+DELETE FROM erp_consolidated_cache a
+USING erp_consolidated_cache b
+WHERE a.id < b.id 
+  AND a.start_date = b.start_date 
+  AND a.end_date = b.end_date;
 ```
 
 ---
 
-## Estrutura Final das Abas
+### 2. Hook useErpCache.ts
 
-| Aba | Conteudo |
-|-----|----------|
-| **{Ano Selecionado}** | Seletor de ano + grafico de barras mensais comparando ano atual vs ano anterior |
-| **{Mes/Ano}** | Seletores de mes/ano + grafico de barras diarias do mes selecionado |
+**Alteracoes:**
+- Remover filtro por `user_id` nas queries de leitura
+- Manter `user_id` apenas como registro de quem atualizou
+- Verificar se usuario e admin antes de permitir escrita
+
+| Funcao | Antes | Depois |
+|--------|-------|--------|
+| `loadMonthFromCache` | `.eq('user_id', user.id)` | Sem filtro de user_id |
+| `saveMonthToCache` | `user_id: user.id` | Verificar admin + `updated_by: user.id` |
+| `updateCacheMeta` | `.eq('user_id', user.id)` | Sem filtro de user_id |
+| `clearAllCache` | `.eq('user_id', user.id)` | Verificar admin + limpar tudo |
 
 ---
 
-## Resultado Visual Esperado
+### 3. SheetDataContext.tsx
 
-### Aba Anual (ex: "2025")
-- Seletor compacto de ano no topo esquerdo
-- Indicador textual "vs 2024" ao lado do seletor
-- Eixo X: Jan, Fev, Mar, ... Dez
-- Duas barras por mes: cinza (ano anterior) e colorida (ano selecionado)
-- Tooltip mostrando ambos os valores
+**Alteracoes:**
+- Adicionar verificacao `isAdmin` antes de chamar `loadErpData`
+- Usuarios nao-admin so podem ler do cache, nunca buscar da API
+- Manter botao de refresh visivel apenas para admin
 
-### Aba Mensal (ex: "Janeiro/2025")
-- Seletores de mes e ano (sem alteracoes)
-- Grafico de barras por dia do mes
+| Funcao | Alteracao |
+|--------|-----------|
+| `loadErpDataProgressive` | Verificar `isAdmin` antes de chamar API |
+| `refreshData` | So permitir para admin |
+
+---
+
+### 4. Dashboard.tsx
+
+**Alteracoes:**
+- Mostrar mensagem diferente para usuarios nao-admin quando nao ha dados
+- Esconder botao de "Atualizar dados" para nao-admin
+
+---
+
+### 5. Componentes de UI
+
+**DashboardHeader.tsx ou LoadingProgress.tsx:**
+- Botao de refresh visivel apenas para admin
+- Indicador de "ultima atualizacao" para todos
+
+---
+
+## Fluxo de Dados
+
+```text
++------------------+          +------------------+          +------------------+
+|     Admin        |  busca   |    API ERP       |  salva   |   erp_cache      |
+|   (isAdmin)      | -------> |                  | -------> | (tabela global)  |
++------------------+          +------------------+          +------------------+
+                                                                    |
+                                                                    | leitura
+                                                                    v
+                                                            +------------------+
+                                                            |  Todos usuarios  |
+                                                            |  (autenticados)  |
+                                                            +------------------+
+```
 
 ---
 
 ## Resumo Tecnico
 
-| Mudanca | Descricao |
-|---------|-----------|
-| Novo estado | `selectedYearForAnnual` para selecao do ano |
-| Nova funcao | `yearlyComparisonData` substitui `last12MonthsData` |
-| UI Aba Anual | Seletor de ano + label "vs {ano-1}" |
-| Nome da aba | Muda de "Ultimos 12 Meses" para exibir o ano selecionado |
+| Arquivo | Tipo de Alteracao |
+|---------|-------------------|
+| `migracao SQL` | Alterar constraints, RLS policies, limpar duplicados |
+| `src/hooks/useErpCache.ts` | Remover filtro user_id na leitura, verificar admin na escrita |
+| `src/contexts/SheetDataContext.tsx` | Verificar isAdmin antes de fetch API |
+| `src/pages/Dashboard.tsx` | UI condicional para admin/reader |
+| `src/integrations/supabase/types.ts` | Atualizado automaticamente |
+
+---
+
+## Beneficios
+
+1. **Menos requisicoes a API do ERP** - dados buscados uma vez, usados por todos
+2. **Consistencia** - todos veem os mesmos dados
+3. **Menor uso de armazenamento** - elimina duplicacao entre usuarios
+4. **Seguranca** - apenas admin pode modificar dados de vendas
 
