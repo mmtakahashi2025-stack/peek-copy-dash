@@ -263,8 +263,8 @@ export function SalesEvolutionChart({
           onValueChange={(v) => setActiveTab(v as 'anual' | 'mensal')}
         >
           <TabsList className="mb-4">
-            <TabsTrigger value="anual">{selectedYearForAnnual}</TabsTrigger>
-            <TabsTrigger value="mensal">{mesesCompletos[selectedMonth]}/{selectedYear}</TabsTrigger>
+            <TabsTrigger value="anual">ANO {selectedYearForAnnual}</TabsTrigger>
+            <TabsTrigger value="mensal">MÊS {mesesCompletos[selectedMonth]}/{selectedYear}</TabsTrigger>
           </TabsList>
           
           {/* Faturamento Anual com Comparativo do Ano Anterior */}
