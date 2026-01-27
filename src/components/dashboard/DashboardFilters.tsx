@@ -386,31 +386,33 @@ export function DashboardFilters({ onFiltersChange }: DashboardFiltersProps) {
         {isLoading ? 'Buscando...' : 'Filtrar'}
       </Button>
 
-      {/* Force Refresh Button */}
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button 
-              variant="outline" 
-              size="icon"
-              onClick={() => {
-                if (dateRange?.from && dateRange?.to) {
-                  loadErpData(dateRange.from, dateRange.to, true);
-                }
-              }}
-              disabled={isLoading}
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Atualizar dados (ignorar cache)</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      {/* Force Refresh Button - Admin Only */}
+      {isAdmin && (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={() => {
+                  if (dateRange?.from && dateRange?.to) {
+                    loadErpData(dateRange.from, dateRange.to, true);
+                  }
+                }}
+                disabled={isLoading}
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Atualizar dados (ignorar cache)</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
 
-      {/* Cache Info Button */}
-      <CacheInfoButton />
+      {/* Cache Info Button - Admin Only */}
+      {isAdmin && <CacheInfoButton />}
     </div>
   );
 }
