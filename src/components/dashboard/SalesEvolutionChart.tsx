@@ -45,6 +45,7 @@ const formatCurrencyFull = (value: number) => {
 
 interface SalesEvolutionChartProps {
   filialId?: string;
+  colaboradorId?: string;
   dateFrom?: Date;
   dateTo?: Date;
   compareEnabled?: boolean;
@@ -94,20 +95,51 @@ const parseRowDate = (dataVenda: number | string): Date | null => {
 };
 
 export function SalesEvolutionChart({ 
-  filialId = 'todas', 
+  filialId = 'todas',
+  colaboradorId = 'todos',
+  dateFrom,
+  dateTo,
+  compareEnabled = false,
+  compareDateFrom,
+  compareDateTo,
 }: SalesEvolutionChartProps) {
   const { user, loading: authLoading } = useAuth();
   const { rawData, yearlyRawData, isLoadingYearly, loadYearlyData } = useSheetData();
   
-  // Local state for month/year selection
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  // Local state for month/year selection - initialized from props
+  const [selectedMonth, setSelectedMonth] = useState(() => 
+    dateFrom ? dateFrom.getMonth() : new Date().getMonth()
+  );
+  const [selectedYear, setSelectedYear] = useState(() => 
+    dateFrom ? dateFrom.getFullYear() : new Date().getFullYear()
+  );
   
-  // State for annual tab year selection
-  const [selectedYearForAnnual, setSelectedYearForAnnual] = useState(new Date().getFullYear());
+  // State for annual tab year selection - initialized from props
+  const [selectedYearForAnnual, setSelectedYearForAnnual] = useState(() => 
+    dateFrom ? dateFrom.getFullYear() : new Date().getFullYear()
+  );
   
   // Track loaded years to avoid duplicate calls
   const loadedYearsRef = useRef<string>('');
+  const isInitialMountRef = useRef(true);
+  
+  // Sync internal state when dashboard filters change
+  useEffect(() => {
+    if (dateFrom && !isInitialMountRef.current) {
+      setSelectedMonth(dateFrom.getMonth());
+      setSelectedYear(dateFrom.getFullYear());
+      setSelectedYearForAnnual(dateFrom.getFullYear());
+    }
+    isInitialMountRef.current = false;
+  }, [dateFrom]);
+  
+  // Determine comparison year based on filter or default to previous year
+  const previousYear = useMemo(() => {
+    if (compareEnabled && compareDateFrom) {
+      return compareDateFrom.getFullYear();
+    }
+    return selectedYearForAnnual - 1;
+  }, [compareEnabled, compareDateFrom, selectedYearForAnnual]);
 
   // Generate year options dynamically
   const yearOptions = useMemo(() => {
@@ -172,9 +204,15 @@ export function SalesEvolutionChart({
   // Faturamento do ano selecionado com comparativo do ano anterior
   // Uses yearlyRawData which loads complete years from cache
   const yearlyComparisonData = useMemo(() => {
-    const filialFiltered = filialId === 'todas' 
+    // Filter by filial
+    let filtered = filialId === 'todas' 
       ? yearlyRawData 
       : yearlyRawData.filter(r => normalizeFilialId(r.Filial) === filialId);
+    
+    // Filter by colaborador
+    if (colaboradorId && colaboradorId !== 'todos') {
+      filtered = filtered.filter(r => r.Emissor === colaboradorId);
+    }
 
     // Generate all 12 months of the selected year
     const months = meses.map((mes, index) => ({
@@ -185,7 +223,7 @@ export function SalesEvolutionChart({
     // Group data by year-month
     const monthlyFaturamento: { [key: string]: number } = {};
     
-    filialFiltered.forEach(row => {
+    filtered.forEach(row => {
       const rowDate = parseRowDate(row['Data Venda']);
       if (!rowDate || isNaN(rowDate.getTime())) return;
       
@@ -197,10 +235,10 @@ export function SalesEvolutionChart({
       }
     });
 
-    // Return data with previous year comparison
+    // Return data with previous year comparison (using dynamic previousYear)
     return months.map(m => {
       const currentKey = `${selectedYearForAnnual}-${m.month}`;
-      const previousKey = `${selectedYearForAnnual - 1}-${m.month}`;
+      const previousKey = `${previousYear}-${m.month}`;
       
       return {
         mes: m.label,
@@ -208,13 +246,19 @@ export function SalesEvolutionChart({
         faturamentoAnterior: Math.round(monthlyFaturamento[previousKey] || 0),
       };
     });
-  }, [yearlyRawData, filialId, selectedYearForAnnual]);
+  }, [yearlyRawData, filialId, colaboradorId, selectedYearForAnnual, previousYear]);
 
   // Faturamento mensal (por dias) - uses yearlyRawData for full cache access
   const dailyData = useMemo(() => {
-    const filialFiltered = filialId === 'todas' 
+    // Filter by filial
+    let filtered = filialId === 'todas' 
       ? yearlyRawData 
       : yearlyRawData.filter(r => normalizeFilialId(r.Filial) === filialId);
+    
+    // Filter by colaborador
+    if (colaboradorId && colaboradorId !== 'todos') {
+      filtered = filtered.filter(r => r.Emissor === colaboradorId);
+    }
 
     const targetYear = selectedYear;
     const targetMonth = selectedMonth;
@@ -222,7 +266,7 @@ export function SalesEvolutionChart({
 
     const dailyFaturamento: { [day: number]: number } = {};
     
-    filialFiltered.forEach(row => {
+    filtered.forEach(row => {
       const rowDate = parseRowDate(row['Data Venda']);
       if (!rowDate || isNaN(rowDate.getTime())) return;
       
@@ -240,11 +284,14 @@ export function SalesEvolutionChart({
       dia: String(i + 1).padStart(2, '0'),
       faturamento: Math.round(dailyFaturamento[i + 1] || 0),
     }));
-  }, [yearlyRawData, filialId, selectedMonth, selectedYear]);
+  }, [yearlyRawData, filialId, colaboradorId, selectedMonth, selectedYear]);
 
   const hasYearlyData = yearlyComparisonData.some(d => d.faturamento > 0 || d.faturamentoAnterior > 0);
   const hasPreviousYearData = yearlyComparisonData.some(d => d.faturamentoAnterior > 0);
   const hasDailyData = dailyData.some(d => d.faturamento > 0);
+  
+  // Label for comparison indicator
+  const comparisonLabel = compareEnabled ? `vs ${previousYear} (filtro)` : `vs ${previousYear}`;
 
   return (
     <Card>
@@ -277,12 +324,12 @@ export function SalesEvolutionChart({
                   </SelectContent>
                 </Select>
                 <span className="text-sm text-muted-foreground">
-                  vs {selectedYearForAnnual - 1}
+                  {comparisonLabel}
                 </span>
               </div>
               {hasYearlyData && !hasPreviousYearData && (
                 <p className="text-xs text-warning">
-                  Dados de {selectedYearForAnnual - 1} não disponíveis para comparação
+                  Dados de {previousYear} não disponíveis para comparação
                 </p>
               )}
             </div>
@@ -325,7 +372,7 @@ export function SalesEvolutionChart({
                     {/* Barra do ano anterior (mais clara, atrás) */}
                     <Bar 
                       dataKey="faturamentoAnterior" 
-                      name={`${selectedYearForAnnual - 1}`}
+                      name={`${previousYear}`}
                       fill="hsl(var(--muted-foreground))" 
                       opacity={0.4}
                       radius={[4, 4, 0, 0]}
