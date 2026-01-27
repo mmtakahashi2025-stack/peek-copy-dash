@@ -251,6 +251,13 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   const loadYearlyData = useCallback(async (years: number[]) => {
     if (years.length === 0) return;
     
+    // Verify user is available via supabase directly to avoid race condition
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (!currentUser) {
+      console.log('[YearlyData] User not available yet, skipping load');
+      return;
+    }
+    
     setIsLoadingYearly(true);
     const allData: RawSaleRow[] = [];
     
@@ -260,12 +267,13 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
           const monthData = await getMonthData(year, month);
           if (monthData) {
             allData.push(...monthData);
+            console.log(`[YearlyData] Loaded ${year}-${month}: ${monthData.length} records`);
           }
         }
       }
       
       setYearlyRawData(allData);
-      console.log(`[YearlyData] Loaded ${allData.length} records for years: ${years.join(', ')}`);
+      console.log(`[YearlyData] Total: ${allData.length} records for years: ${years.join(', ')}`);
     } catch (error) {
       console.error('[YearlyData] Error loading yearly data:', error);
     } finally {
