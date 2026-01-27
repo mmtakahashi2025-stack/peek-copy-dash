@@ -1,107 +1,115 @@
 
-# Ocultar Botoes Admin e Reorganizar Layout
 
-## Resumo das Alteracoes
+# Correção: Dados Não Visualizados por Não-Admin e Botão ERP Online
 
-1. **Ocultar botoes de cache e refresh para usuarios nao-admin**
-2. **Reorganizar modulos para ficarem lado a lado**
+## Problemas Identificados
+
+### 1. Botão "ERP Online" Visível Para Todos
+O componente `SheetConfigDialog` (que renderiza o botão "ERP Online") está sendo exibido para todos os usuários no header, sem verificação de role.
+
+**Localização:** `src/components/dashboard/DashboardHeader.tsx`
+- Linha 75 (desktop): `<SheetConfigDialog />`
+- Linha 135 (mobile): `<SheetConfigDialog />`
+
+### 2. Dados Não Sendo Carregados Para Não-Admin
+O `loadErpData` só é chamado quando `isAdmin` é true, impedindo que usuários não-admin carreguem dados do cache.
+
+**Localização:** `src/pages/Dashboard.tsx`
+- Linhas 60-71: Auto-load bloqueado para não-admin
+- Linhas 116-120: Reload em mudança de filtro bloqueado para não-admin
+
+**Causa raiz:** A função `loadErpData` internamente já diferencia entre admin (busca API + cache) e não-admin (apenas cache). Porém, a chamada está sendo bloqueada no Dashboard antes mesmo de chegar ao contexto.
 
 ---
 
-## 1. Ocultar Botoes Admin-Only
+## Alterações Necessárias
 
-**Arquivo:** `src/components/dashboard/DashboardFilters.tsx`
+### Arquivo 1: `src/components/dashboard/DashboardHeader.tsx`
 
-### Botao de Refresh ERP (linhas 389-410)
-Envolver o botao `RefreshCw` em uma verificacao `isAdmin`:
+| Linha | Alteração |
+|-------|-----------|
+| 75 | Envolver `<SheetConfigDialog />` em `{isAdmin && ...}` |
+| 135 | Envolver `<SheetConfigDialog />` em `{isAdmin && ...}` |
 
+**Código:**
 ```tsx
-// Antes (linhas 389-410): Visivel para todos
-<TooltipProvider>
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <Button variant="outline" size="icon" onClick={...}>
-        <RefreshCw className="h-4 w-4" />
-      </Button>
-    </TooltipTrigger>
-    ...
-  </Tooltip>
-</TooltipProvider>
+// Desktop (linha 75)
+{isAdmin && <SheetConfigDialog />}
 
-// Depois: Apenas para admin
-{isAdmin && (
-  <TooltipProvider>
-    <Tooltip>
-      ...
-    </Tooltip>
-  </TooltipProvider>
-)}
+// Mobile (linha 135)
+{isAdmin && <SheetConfigDialog />}
 ```
 
-### Botao de Cache (linha 413)
-Envolver o `CacheInfoButton` em verificacao `isAdmin`:
+### Arquivo 2: `src/pages/Dashboard.tsx`
 
+Modificar a lógica de carregamento para permitir que não-admin também carreguem dados (do cache).
+
+| Linhas | Antes | Depois |
+|--------|-------|--------|
+| 60-71 | Auto-load só para admin | Auto-load para todos (cache será lido) |
+| 116-120 | Reload só para admin | Reload para todos (não-admin lerá do cache) |
+
+**Linha 60-71 - Remover condição `isAdmin`:**
 ```tsx
 // Antes
-<CacheInfoButton />
+if (
+  !initialLoadDone && 
+  !isLoading && 
+  !isConnected && 
+  erpCredentials?.hasPassword &&
+  isAdmin  // <-- Remover
+) {
 
 // Depois
-{isAdmin && <CacheInfoButton />}
+if (
+  !initialLoadDone && 
+  !isLoading && 
+  !isConnected && 
+  erpCredentials?.hasPassword
+) {
+```
+
+**Linha 116-120 - Remover condição `isAdmin`:**
+```tsx
+// Antes
+if (isConnected && filters.dateFrom && filters.dateTo && isAdmin) {
+  loadErpData(filters.dateFrom, filters.dateTo);
+}
+
+// Depois
+if (isConnected && filters.dateFrom && filters.dateTo) {
+  loadErpData(filters.dateFrom, filters.dateTo);
+}
 ```
 
 ---
 
-## 2. Reorganizar Layout dos Modulos
+## Fluxo Após Correção
 
-**Objetivo:** Colocar os tres modulos (Evolucao de Vendas, Ranking Colaboradores, Produtos Mais Vendidos) lado a lado em telas grandes.
+| Usuário | Ação no Dashboard | Resultado |
+|---------|-------------------|-----------|
+| Admin | Auto-load / Filtrar | Busca API + salva cache + exibe dados |
+| Não-Admin | Auto-load / Filtrar | Lê do cache global + exibe dados |
 
-### Alteracoes Necessarias
-
-**Arquivo:** `src/components/dashboard/SalesEvolutionChart.tsx`
-
-| Linha | Antes | Depois |
-|-------|-------|--------|
-| 193 | `lg:col-span-2` | `lg:col-span-1` |
-| 205, 227, 279, 312 | `h-[300px]` / `h-[240px]` | `h-[280px]` / `h-[220px]` |
-
-**Arquivo:** `src/pages/Dashboard.tsx`
-
-A grid atual `grid-cols-1 lg:grid-cols-3` ja suporta 3 colunas. Com o chart usando apenas 1 coluna, os tres modulos ficarao lado a lado automaticamente.
+A função `loadErpDataProgressive` (no contexto) já possui a lógica correta:
+1. Verifica quais meses estão em cache
+2. Para não-admin, apenas carrega do cache (não faz fetch da API)
+3. Se não houver cache, exibe mensagem "aguardando dados do ERP"
 
 ---
 
-## Visualizacao do Layout
+## Resumo das Alterações
 
-**Antes (Grid 3 colunas):**
-```text
-+---------------------+---------------------+---------------------+
-|     Evolucao de Vendas (col-span-2)       |    Ranking          |
-+---------------------+---------------------+---------------------+
-|     Produtos                              |                     |
-+-------------------------------------------+---------------------+
-```
-
-**Depois (Grid 3 colunas):**
-```text
-+---------------+---------------+---------------+
-|   Evolucao    |    Ranking    |   Produtos    |
-|   de Vendas   | Colaboradores | Mais Vendidos |
-+---------------+---------------+---------------+
-```
-
----
-
-## Arquivos a Modificar
-
-| Arquivo | Alteracao |
+| Arquivo | Alteração |
 |---------|-----------|
-| `src/components/dashboard/DashboardFilters.tsx` | Envolver `RefreshCw` e `CacheInfoButton` em `{isAdmin && ...}` |
-| `src/components/dashboard/SalesEvolutionChart.tsx` | Mudar `lg:col-span-2` para `lg:col-span-1`, ajustar alturas |
+| `src/components/dashboard/DashboardHeader.tsx` | Adicionar `{isAdmin && ...}` ao redor de `<SheetConfigDialog />` (desktop + mobile) |
+| `src/pages/Dashboard.tsx` | Remover condição `isAdmin` das linhas 66 e 117 para permitir carregamento de cache para não-admin |
 
 ---
 
 ## Resultado Esperado
 
-- Usuarios **nao-admin** nao verao os botoes de cache e refresh do ERP
-- Os tres modulos (grafico + 2 rankings) aparecerao **lado a lado** em telas grandes
-- Em telas menores (mobile/tablet), os modulos continuarao empilhados verticalmente
+- Botão "ERP Online" visível **apenas para admin**
+- Usuários não-admin poderão **visualizar dados do cache global** carregado pelo admin
+- Se não houver dados em cache, não-admin verá mensagem "aguardando dados do ERP"
+
