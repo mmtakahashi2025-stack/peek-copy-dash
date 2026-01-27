@@ -1,10 +1,10 @@
 
-# Melhorias no Grafico de Evolucao de Vendas
 
-## Resumo das Mudancas
+# Alteracao do Grafico de Evolucao de Vendas: Seletor de Ano com Comparativo
 
-1. **Aba Mensal**: Adicionar seletores de mes e ano para navegacao livre
-2. **Aba Ultimos 12 Meses**: Adicionar comparativo com o mesmo periodo do ano anterior
+## Resumo da Mudanca
+
+Substituir a aba "Ultimos 12 Meses" por uma aba "Anual" com seletor de ano, onde o usuario pode escolher qualquer ano disponivel e visualizar o faturamento mensal daquele ano comparado com o ano anterior.
 
 ---
 
@@ -12,52 +12,29 @@
 
 ### Arquivo: `src/components/dashboard/SalesEvolutionChart.tsx`
 
-#### 1. Adicionar Estado Local para Mes/Ano Selecionado
+#### 1. Adicionar Estado para Ano Selecionado na Aba Anual
 
 ```typescript
-import { useState, useMemo } from 'react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-
-// Dentro do componente, adicionar estados:
-const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+// Linha ~101: Adicionar novo estado para o ano da aba anual
+const [selectedYearForAnnual, setSelectedYearForAnnual] = useState(new Date().getFullYear());
 ```
 
-#### 2. Atualizar chartConfig para Suportar Comparativo
+#### 2. Substituir `last12MonthsData` por `yearlyComparisonData`
+
+A logica muda de "ultimos 12 meses rolantes" para "todos os 12 meses do ano selecionado":
 
 ```typescript
-const chartConfig: ChartConfig = {
-  faturamento: {
-    label: 'Faturamento Atual',
-    color: 'hsl(var(--primary))',
-  },
-  faturamentoAnterior: {
-    label: 'Periodo Anterior',
-    color: 'hsl(var(--muted-foreground))',
-  },
-};
-```
-
-#### 3. Modificar `last12MonthsData` para Incluir Comparativo
-
-```typescript
-const last12MonthsData = useMemo(() => {
+// Faturamento do ano selecionado com comparativo do ano anterior
+const yearlyComparisonData = useMemo(() => {
   const filialFiltered = filialId === 'todas' 
     ? rawData 
     : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
 
-  const now = new Date();
-  const months: { year: number; month: number; label: string }[] = [];
-  
-  // Ultimos 12 meses
-  for (let i = 11; i >= 0; i--) {
-    const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push({
-      year: date.getFullYear(),
-      month: date.getMonth(),
-      label: `${meses[date.getMonth()]}/${String(date.getFullYear()).slice(-2)}`,
-    });
-  }
+  // Gerar os 12 meses do ano selecionado
+  const months = meses.map((mes, index) => ({
+    month: index,
+    label: mes,
+  }));
 
   // Agrupar faturamento por ano-mes
   const monthlyFaturamento: { [key: string]: number } = {};
@@ -74,8 +51,8 @@ const last12MonthsData = useMemo(() => {
 
   // Retornar dados com comparativo do ano anterior
   return months.map(m => {
-    const currentKey = `${m.year}-${m.month}`;
-    const previousKey = `${m.year - 1}-${m.month}`;
+    const currentKey = `${selectedYearForAnnual}-${m.month}`;
+    const previousKey = `${selectedYearForAnnual - 1}-${m.month}`;
     
     return {
       mes: m.label,
@@ -83,76 +60,23 @@ const last12MonthsData = useMemo(() => {
       faturamentoAnterior: Math.round(monthlyFaturamento[previousKey] || 0),
     };
   });
-}, [rawData, filialId]);
+}, [rawData, filialId, selectedYearForAnnual]);
 ```
 
-#### 4. Modificar `dailyData` para Usar Mes/Ano Selecionado
+#### 3. Atualizar a UI da Aba Anual
+
+Substituir o conteudo da aba "12meses" para incluir o seletor de ano:
 
 ```typescript
-const dailyData = useMemo(() => {
-  const filialFiltered = filialId === 'todas' 
-    ? rawData 
-    : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
+{/* Aba Anual - nome da aba mostra o ano selecionado */}
+<TabsTrigger value="anual">{selectedYearForAnnual}</TabsTrigger>
 
-  // Usar mes/ano selecionado ao inves do filtro de datas
-  const targetYear = selectedYear;
-  const targetMonth = selectedMonth;
-  const daysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
-
-  const dailyFaturamento: { [day: number]: number } = {};
-  
-  filialFiltered.forEach(row => {
-    const rowDate = parseRowDate(row['Data Venda']);
-    if (!rowDate || isNaN(rowDate.getTime())) return;
-    
-    if (rowDate.getFullYear() === targetYear && rowDate.getMonth() === targetMonth) {
-      const day = rowDate.getDate();
-      if (row.Tipo !== 'PC') {
-        dailyFaturamento[day] = (dailyFaturamento[day] || 0) + (row.Líquido || 0);
-      }
-    }
-  });
-
-  return Array.from({ length: daysInMonth }, (_, i) => ({
-    dia: String(i + 1).padStart(2, '0'),
-    faturamento: Math.round(dailyFaturamento[i + 1] || 0),
-  }));
-}, [rawData, filialId, selectedMonth, selectedYear]);
-```
-
-#### 5. Gerar Opcoes de Anos Dinamicamente
-
-```typescript
-const yearOptions = useMemo(() => {
-  const currentYear = new Date().getFullYear();
-  // Gerar range de 5 anos atras ate o ano atual
-  return Array.from({ length: 6 }, (_, i) => currentYear - 5 + i);
-}, []);
-```
-
-#### 6. Atualizar UI da Aba Mensal com Seletores
-
-```typescript
-<TabsContent value="mensal" className="h-[300px]">
-  {/* Seletores de Mes e Ano */}
-  <div className="flex gap-2 mb-4">
+<TabsContent value="anual" className="h-[300px]">
+  {/* Seletor de Ano */}
+  <div className="flex items-center gap-2 mb-4">
     <Select 
-      value={String(selectedMonth)} 
-      onValueChange={(v) => setSelectedMonth(parseInt(v))}
-    >
-      <SelectTrigger className="w-[140px] h-8">
-        <SelectValue placeholder="Mes" />
-      </SelectTrigger>
-      <SelectContent>
-        {mesesCompletos.map((mes, index) => (
-          <SelectItem key={index} value={String(index)}>{mes}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-    
-    <Select 
-      value={String(selectedYear)} 
-      onValueChange={(v) => setSelectedYear(parseInt(v))}
+      value={String(selectedYearForAnnual)} 
+      onValueChange={(v) => setSelectedYearForAnnual(parseInt(v))}
     >
       <SelectTrigger className="w-[100px] h-8">
         <SelectValue placeholder="Ano" />
@@ -163,82 +87,48 @@ const yearOptions = useMemo(() => {
         ))}
       </SelectContent>
     </Select>
+    <span className="text-sm text-muted-foreground">
+      vs {selectedYearForAnnual - 1}
+    </span>
   </div>
   
-  {/* Grafico de barras diarias */}
-  <div className="h-[250px]">
-    {/* ... conteudo do grafico ... */}
+  {/* Grafico com altura ajustada */}
+  <div className="h-[240px]">
+    {/* BarChart com duas barras comparativas */}
   </div>
 </TabsContent>
 ```
 
-#### 7. Atualizar Grafico de 12 Meses com Barras Comparativas
+#### 4. Atualizar Verificacao de Dados
 
 ```typescript
-<TabsContent value="12meses" className="h-[300px]">
-  <ChartContainer config={chartConfig} className="h-full w-full">
-    <BarChart data={last12MonthsData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
-      <XAxis 
-        dataKey="mes" 
-        tick={{ fontSize: 11 }}
-        className="fill-muted-foreground"
-        tickLine={false}
-        axisLine={false}
-      />
-      <YAxis 
-        tick={{ fontSize: 11 }}
-        tickFormatter={formatCurrency}
-        className="fill-muted-foreground"
-        tickLine={false}
-        axisLine={false}
-        width={60}
-      />
-      <ChartTooltip 
-        content={<ChartTooltipContent />} 
-        formatter={(value: number) => formatCurrencyFull(value)}
-      />
-      {/* Barra do periodo anterior (mais clara, atras) */}
-      <Bar 
-        dataKey="faturamentoAnterior" 
-        name="Periodo Anterior"
-        fill="hsl(var(--muted-foreground))" 
-        opacity={0.4}
-        radius={[4, 4, 0, 0]}
-      />
-      {/* Barra do periodo atual (cor principal, frente) */}
-      <Bar 
-        dataKey="faturamento" 
-        name="Faturamento Atual"
-        fill="hsl(var(--primary))" 
-        radius={[4, 4, 0, 0]}
-      />
-    </BarChart>
-  </ChartContainer>
-</TabsContent>
+// Atualizar de hasLast12MonthsData para hasYearlyData
+const hasYearlyData = yearlyComparisonData.some(d => d.faturamento > 0 || d.faturamentoAnterior > 0);
 ```
 
-#### 8. Atualizar Titulo da Aba Mensal
+---
 
-```typescript
-<TabsTrigger value="mensal">
-  {mesesCompletos[selectedMonth]}/{selectedYear}
-</TabsTrigger>
-```
+## Estrutura Final das Abas
+
+| Aba | Conteudo |
+|-----|----------|
+| **{Ano Selecionado}** | Seletor de ano + grafico de barras mensais comparando ano atual vs ano anterior |
+| **{Mes/Ano}** | Seletores de mes/ano + grafico de barras diarias do mes selecionado |
 
 ---
 
 ## Resultado Visual Esperado
 
-### Aba "Ultimos 12 Meses"
-- Duas barras por mes: uma clara (ano anterior) e uma colorida (ano atual)
-- Tooltip mostrando ambos os valores para comparacao
-- Legenda identificando cada serie
+### Aba Anual (ex: "2025")
+- Seletor compacto de ano no topo esquerdo
+- Indicador textual "vs 2024" ao lado do seletor
+- Eixo X: Jan, Fev, Mar, ... Dez
+- Duas barras por mes: cinza (ano anterior) e colorida (ano selecionado)
+- Tooltip mostrando ambos os valores
 
-### Aba Mensal
-- Seletores compactos de mes e ano acima do grafico
-- Grafico de barras por dia do mes selecionado
-- Titulo da aba reflete a selecao atual
+### Aba Mensal (ex: "Janeiro/2025")
+- Seletores de mes e ano (sem alteracoes)
+- Grafico de barras por dia do mes
 
 ---
 
@@ -246,8 +136,8 @@ const yearOptions = useMemo(() => {
 
 | Mudanca | Descricao |
 |---------|-----------|
-| Estado local | `selectedMonth` e `selectedYear` para navegacao |
-| `last12MonthsData` | Inclui `faturamentoAnterior` do ano anterior |
-| `dailyData` | Usa mes/ano do estado local |
-| UI Mensal | Seletores de mes e ano com Select |
-| UI 12 Meses | Duas barras (atual + anterior) sobrepostas |
+| Novo estado | `selectedYearForAnnual` para selecao do ano |
+| Nova funcao | `yearlyComparisonData` substitui `last12MonthsData` |
+| UI Aba Anual | Seletor de ano + label "vs {ano-1}" |
+| Nome da aba | Muda de "Ultimos 12 Meses" para exibir o ano selecionado |
+
