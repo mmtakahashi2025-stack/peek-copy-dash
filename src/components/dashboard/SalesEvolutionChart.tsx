@@ -187,6 +187,7 @@ export function SalesEvolutionChart({
   }, [rawData, filialId, selectedMonth, selectedYear]);
 
   const hasYearlyData = yearlyComparisonData.some(d => d.faturamento > 0 || d.faturamentoAnterior > 0);
+  const hasPreviousYearData = yearlyComparisonData.some(d => d.faturamentoAnterior > 0);
   const hasDailyData = dailyData.some(d => d.faturamento > 0);
 
   return (
@@ -204,23 +205,30 @@ export function SalesEvolutionChart({
           {/* Faturamento Anual com Comparativo do Ano Anterior */}
           <TabsContent value="anual" className="h-[280px]">
             {/* Seletor de Ano */}
-            <div className="flex items-center gap-2 mb-4">
-              <Select 
-                value={String(selectedYearForAnnual)} 
-                onValueChange={(v) => setSelectedYearForAnnual(parseInt(v))}
-              >
-                <SelectTrigger className="w-[100px] h-8">
-                  <SelectValue placeholder="Ano" />
-                </SelectTrigger>
-                <SelectContent>
-                  {yearOptions.map((year) => (
-                    <SelectItem key={year} value={String(year)}>{year}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <span className="text-sm text-muted-foreground">
-                vs {selectedYearForAnnual - 1}
-              </span>
+            <div className="flex flex-col gap-1 mb-4">
+              <div className="flex items-center gap-2">
+                <Select 
+                  value={String(selectedYearForAnnual)} 
+                  onValueChange={(v) => setSelectedYearForAnnual(parseInt(v))}
+                >
+                  <SelectTrigger className="w-[100px] h-8">
+                    <SelectValue placeholder="Ano" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {yearOptions.map((year) => (
+                      <SelectItem key={year} value={String(year)}>{year}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="text-sm text-muted-foreground">
+                  vs {selectedYearForAnnual - 1}
+                </span>
+              </div>
+              {hasYearlyData && !hasPreviousYearData && (
+                <p className="text-xs text-warning">
+                  Dados de {selectedYearForAnnual - 1} não disponíveis para comparação
+                </p>
+              )}
             </div>
             
             {/* Gráfico Anual */}

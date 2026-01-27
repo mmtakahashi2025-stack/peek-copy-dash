@@ -13,6 +13,7 @@ import { useSheetData, LoginTestResult } from '@/contexts/SheetDataContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useUserRole } from '@/hooks/useUserRole';
 
 function formatDateTime(date: Date | null): string {
   if (!date) return '--';
@@ -27,12 +28,17 @@ function formatDateTime(date: Date | null): string {
 }
 
 export function SheetConfigDialog() {
+  // All hooks must be called before any conditional returns
+  const { isAdmin, isLoading: isRoleLoading } = useUserRole();
   const [open, setOpen] = useState(false);
   const { rawData, isLoading, error, isConnected, diagnostic, testErpLogin } = useSheetData();
-  
-  // Login test state
   const [isTestingLogin, setIsTestingLogin] = useState(false);
   const [loginTestResult, setLoginTestResult] = useState<LoginTestResult | null>(null);
+
+  // Guard: não renderiza para não-admin (after all hooks)
+  if (!isAdmin && !isRoleLoading) {
+    return null;
+  }
 
   const handleTestLogin = async () => {
     setIsTestingLogin(true);
