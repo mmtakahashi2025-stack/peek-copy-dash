@@ -252,8 +252,56 @@ export function useErpCache() {
   // Get cached data for a specific month
   const getMonthData = useCallback(async (year: number, month: number): Promise<RawSaleRow[] | null> => {
     const entry = await loadMonthFromCache(year, month);
+    if (!entry) {
+      console.log(`[Cache] getMonthData(${year}-${month}): No data found (user: ${user ? 'yes' : 'no'})`);
+    }
     return entry?.data || null;
-  }, [loadMonthFromCache]);
+  }, [loadMonthFromCache, user]);
+
+  // Batch load multiple months in a single query (more efficient)
+  const getMultipleMonthsData = useCallback(async (
+    months: { year: number; month: number }[]
+  ): Promise<Map<string, RawSaleRow[]>> => {
+    let currentUser = user;
+    if (!currentUser) {
+      const { data } = await supabase.auth.getUser();
+      currentUser = data.user;
+    }
+    
+    if (!currentUser) return new Map();
+    
+    const result = new Map<string, RawSaleRow[]>();
+    
+    try {
+      // Build OR conditions for all requested months
+      const orConditions = months.map(m => `and(year.eq.${m.year},month.eq.${m.month})`).join(',');
+      
+      const { data, error } = await supabase
+        .from('erp_cache')
+        .select('year, month, data, record_count')
+        .or(orConditions);
+      
+      if (error || !data) {
+        console.error('[Cache] Error loading multiple months:', error);
+        return result;
+      }
+      
+      for (const row of data) {
+        const key = `${row.year}-${row.month}`;
+        const rawData = row.data as unknown;
+        if (Array.isArray(rawData)) {
+          result.set(key, rawData as RawSaleRow[]);
+          console.log(`[Cache] Batch loaded ${key}: ${row.record_count} records`);
+        }
+      }
+      
+      console.log(`[Cache] Batch loaded ${result.size}/${months.length} months`);
+    } catch (error) {
+      console.error('[Cache] Error in batch load:', error);
+    }
+    
+    return result;
+  }, [user]);
 
   // Save data for a specific month
   const setMonthData = useCallback(async (year: number, month: number, data: RawSaleRow[]): Promise<boolean> => {
@@ -570,6 +618,7 @@ export function useErpCache() {
     isLoading,
     // New methods for smart caching
     getMonthData,
+    getMultipleMonthsData,
     setMonthData,
     isMonthCached,
     monthNeedsRefresh,
