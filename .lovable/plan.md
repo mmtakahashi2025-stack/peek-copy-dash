@@ -1,45 +1,13 @@
 
-# Plano: Melhorar Organização do Card de Evolução de Vendas
+# Plano: Separar Modo de Visualizacao (ANO/MES) dos Seletores de Periodo
 
-## Problema Atual
+## Entendimento do Problema
 
-1. Os seletores de mês e ano não possuem labels visíveis, dificultando identificação
-2. Layout das tabs e seletores pode ser mais organizado
-3. Falta hierarquia visual clara entre controles e gráfico
+Atualmente as tabs mostram "ANO 2026" e "MES Janeiro/2026", misturando o modo de visualizacao com o periodo selecionado.
 
----
-
-## Mudanças Propostas
-
-### 1. Adicionar Labels aos Seletores (Aba Mensal)
-
-Transformar de:
-```
-[Janeiro ▼] [2026 ▼]
-```
-
-Para:
-```
-Mês [Janeiro ▼]   Ano [2026 ▼]
-```
-
-### 2. Adicionar Label ao Seletor (Aba Anual)
-
-Transformar de:
-```
-[2026 ▼] vs 2025
-```
-
-Para:
-```
-Ano [2026 ▼] comparado com 2025
-```
-
-### 3. Reorganizar Layout do Header
-
-- Mover seletores para a mesma linha das tabs (quando houver espaço)
-- Usar separador visual entre tabs e seletores
-- Melhorar espaçamento e alinhamento
+O usuario quer:
+1. Tabs simples: **[ANO]** e **[MES]** - apenas para escolher o modo de visualizacao
+2. Seletores separados abaixo para escolher o periodo especifico
 
 ---
 
@@ -47,14 +15,17 @@ Ano [2026 ▼] comparado com 2025
 
 ```text
 +--------------------------------------------------+
-| Evolução de Vendas                               |
+| Evolucao de Vendas                               |
 +--------------------------------------------------+
-|  [Anual] [Mensal]          Mês [Jan▼]  Ano [26▼] |
+|  [ANO] [MES]                                     |
 |                                                  |
-|  ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓  |
-|  ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓  |
-|  ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓   ▓▓▓  |
-|  Jan   Fev   Mar   Abr   Mai   Jun   Jul   Ago  |
+|  (Se ANO selecionado)                            |
+|  Ano [2026 v]  comparado com 2025                |
+|                                                  |
+|  (Se MES selecionado)                            |
+|  Mes [Janeiro v]   Ano [2026 v]                  |
+|                                                  |
+|  [========= GRAFICO =========]                   |
 +--------------------------------------------------+
 ```
 
@@ -66,97 +37,41 @@ Ano [2026 ▼] comparado com 2025
 
 ---
 
-## Detalhes Tecnicos
+## Mudancas Necessarias
 
-### Aba "Mensal" (linhas 353-381)
-
-```tsx
-// ANTES
-<div className="flex gap-2 mb-4">
-  <Select ...>
-    <SelectTrigger className="w-[140px] h-8">
-      <SelectValue placeholder="Mês" />
-    </SelectTrigger>
-    ...
-  </Select>
-  <Select ...>
-    <SelectTrigger className="w-[100px] h-8">
-      <SelectValue placeholder="Ano" />
-    </SelectTrigger>
-    ...
-  </Select>
-</div>
-
-// DEPOIS
-<div className="flex items-center gap-4 mb-4">
-  <div className="flex items-center gap-2">
-    <span className="text-sm font-medium text-muted-foreground">Mês</span>
-    <Select ...>
-      <SelectTrigger className="w-[140px] h-8">
-        <SelectValue />
-      </SelectTrigger>
-      ...
-    </Select>
-  </div>
-  <div className="flex items-center gap-2">
-    <span className="text-sm font-medium text-muted-foreground">Ano</span>
-    <Select ...>
-      <SelectTrigger className="w-[100px] h-8">
-        <SelectValue />
-      </SelectTrigger>
-      ...
-    </Select>
-  </div>
-</div>
-```
-
-### Aba "Anual" (linhas 272-296)
+### 1. Simplificar as Tabs (linhas 265-268)
 
 ```tsx
 // ANTES
-<div className="flex flex-col gap-1 mb-4">
-  <div className="flex items-center gap-2">
-    <Select ...>
-      <SelectTrigger className="w-[100px] h-8">
-        <SelectValue placeholder="Ano" />
-      </SelectTrigger>
-      ...
-    </Select>
-    <span className="text-sm text-muted-foreground">
-      {comparisonLabel}
-    </span>
-  </div>
-  ...
-</div>
+<TabsList className="mb-4">
+  <TabsTrigger value="anual">ANO {selectedYearForAnnual}</TabsTrigger>
+  <TabsTrigger value="mensal">MES {mesesCompletos[selectedMonth]}/{selectedYear}</TabsTrigger>
+</TabsList>
 
 // DEPOIS
-<div className="flex flex-col gap-1 mb-4">
-  <div className="flex items-center gap-3">
-    <div className="flex items-center gap-2">
-      <span className="text-sm font-medium text-muted-foreground">Ano</span>
-      <Select ...>
-        <SelectTrigger className="w-[100px] h-8">
-          <SelectValue />
-        </SelectTrigger>
-        ...
-      </Select>
-    </div>
-    <span className="text-sm text-muted-foreground">
-      comparado com {previousYear}
-    </span>
-  </div>
-  ...
-</div>
+<TabsList className="mb-4">
+  <TabsTrigger value="anual">ANO</TabsTrigger>
+  <TabsTrigger value="mensal">MES</TabsTrigger>
+</TabsList>
 ```
+
+### 2. Manter Seletores Dentro do TabsContent
+
+Os seletores de periodo ja estao corretamente posicionados dentro de cada `TabsContent`:
+
+- **Aba ANO**: Seletor de ano + texto "comparado com [ano anterior]"
+- **Aba MES**: Seletores de mes e ano
+
+Nenhuma mudanca adicional necessaria nos seletores.
 
 ---
 
 ## Resultado Esperado
 
-| Antes | Depois |
-|-------|--------|
-| Seletores sem contexto | Labels "Mês" e "Ano" visíveis |
-| Layout disperso | Agrupamento visual claro |
-| "vs 2025" pouco explicativo | "comparado com 2025" mais claro |
+| Elemento | Antes | Depois |
+|----------|-------|--------|
+| Tab Anual | "ANO 2026" | "ANO" |
+| Tab Mensal | "MES Janeiro/2026" | "MES" |
+| Seletores | Mantidos | Mantidos |
 
-Os usuários saberão exatamente o que cada seletor controla, melhorando a usabilidade do gráfico.
+O usuario primeiro escolhe se quer ver evolucao por ANO ou por MES, e depois seleciona o periodo especifico nos controles abaixo.
