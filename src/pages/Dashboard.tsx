@@ -233,8 +233,8 @@ export default function Dashboard() {
             compareDateFrom={filters.compareDateFrom}
             compareDateTo={filters.compareDateTo}
           />
-          <RankingCard colaboradores={colaboradores} />
-          <ProductRankingCard produtos={produtos} />
+          <RankingCard colaboradores={colaboradores} rawData={rawData} />
+          <ProductRankingCard produtos={produtos} rawData={rawData} />
         </div>
       </main>
     </div>
