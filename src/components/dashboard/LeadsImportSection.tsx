@@ -44,9 +44,15 @@ const MONTHS_DISPLAY = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
-// Generate year options
+// Generate year options - extended range for historical data
 const currentYear = new Date().getFullYear();
-const YEAR_OPTIONS = [currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
+const currentMonth = new Date().getMonth() + 1; // 1-12
+const YEAR_OPTIONS = Array.from({ length: 10 }, (_, i) => currentYear - 5 + i);
+// Result: [2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030]
+
+// Smart defaults: if we're in first half of year, period likely starts in previous year
+const defaultStartYear = currentMonth <= 6 ? currentYear - 1 : currentYear;
+const defaultEndYear = currentMonth <= 6 ? currentYear : currentYear + 1;
 
 // Tab naming patterns
 type TabPattern = 'prefix-month' | 'month-year';
@@ -112,11 +118,11 @@ export function LeadsImportSection() {
   const [tabPattern, setTabPattern] = useState<TabPattern>('month-year');
   const [progress, setProgress] = useState({ current: 0, total: 0, currentTab: '' });
   
-  // Multi-year range states
+  // Multi-year range states with smart defaults
   const [startMonth, setStartMonth] = useState('7'); // July
-  const [startYear, setStartYear] = useState(currentYear.toString());
+  const [startYear, setStartYear] = useState(defaultStartYear.toString()); // 2025 if in Jan-Jun 2026
   const [endMonth, setEndMonth] = useState('1'); // January
-  const [endYear, setEndYear] = useState((currentYear + 1).toString());
+  const [endYear, setEndYear] = useState(defaultEndYear.toString()); // 2026 if in Jan-Jun 2026
   
   // Clear before import options
   const [clearBeforeImport, setClearBeforeImport] = useState(false);
@@ -461,16 +467,16 @@ export function LeadsImportSection() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Select value={startYear} onValueChange={setStartYear} disabled={isImporting}>
-                    <SelectTrigger className="w-24">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {YEAR_OPTIONS.map(year => (
-                        <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Input
+                    type="number"
+                    value={startYear}
+                    onChange={(e) => setStartYear(e.target.value)}
+                    min="2020"
+                    max="2035"
+                    disabled={isImporting}
+                    className="w-24"
+                    placeholder="Ano"
+                  />
                 </div>
               </div>
               
@@ -491,16 +497,16 @@ export function LeadsImportSection() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Select value={endYear} onValueChange={setEndYear} disabled={isImporting}>
-                    <SelectTrigger className="w-24">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {YEAR_OPTIONS.map(year => (
-                        <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Input
+                    type="number"
+                    value={endYear}
+                    onChange={(e) => setEndYear(e.target.value)}
+                    min="2020"
+                    max="2035"
+                    disabled={isImporting}
+                    className="w-24"
+                    placeholder="Ano"
+                  />
                 </div>
               </div>
 
