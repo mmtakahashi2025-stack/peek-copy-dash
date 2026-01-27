@@ -48,12 +48,26 @@ const MONTHS_DISPLAY = [
 const currentYear = new Date().getFullYear();
 const YEAR_OPTIONS = [currentYear - 2, currentYear - 1, currentYear, currentYear + 1];
 
+// Tab naming patterns
+type TabPattern = 'prefix-month' | 'month-year';
+
+// Generate tab names based on pattern
+const generateTabNames = (pattern: TabPattern, prefix: string, year: number): string[] => {
+  if (pattern === 'month-year') {
+    return MONTHS_PT.map(month => `${month} ${year}`);
+  }
+  // prefix-month: "LEADS JANEIRO", "LEADS FEVEREIRO", etc.
+  return MONTHS_PT.map(month => `${prefix} ${month}`);
+};
+
 export function LeadsImportSection() {
   const [sheetUrl, setSheetUrl] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importAllTabs, setImportAllTabs] = useState(true);
   const [tabPrefix, setTabPrefix] = useState('LEADS');
+  const [tabPattern, setTabPattern] = useState<TabPattern>('month-year');
+  const [tabYear, setTabYear] = useState(currentYear.toString());
   const [progress, setProgress] = useState({ current: 0, total: 0, currentTab: '' });
   
   // Clear before import options
@@ -193,7 +207,7 @@ export function LeadsImportSection() {
     setIsImporting(true);
     setImportResult(null);
     
-    const tabNames = MONTHS_PT.map(month => `${tabPrefix} ${month}`);
+    const tabNames = generateTabNames(tabPattern, tabPrefix, parseInt(tabYear));
     const details: { tabName: string; count: number; error?: string }[] = [];
     let totalCount = 0;
 
@@ -336,18 +350,52 @@ export function LeadsImportSection() {
       </div>
 
       {importAllTabs && (
-        <div className="space-y-2">
-          <Label htmlFor="tab-prefix">Prefixo das abas</Label>
-          <Input
-            id="tab-prefix"
-            value={tabPrefix}
-            onChange={(e) => setTabPrefix(e.target.value.toUpperCase())}
-            placeholder="LEADS"
-            disabled={isImporting}
-          />
-          <p className="text-xs text-muted-foreground">
-            Ex: "{tabPrefix} JANEIRO", "{tabPrefix} FEVEREIRO", etc.
-          </p>
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label>Formato dos nomes das abas</Label>
+            <Select value={tabPattern} onValueChange={(v) => setTabPattern(v as TabPattern)} disabled={isImporting}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="month-year">MÊS ANO (ex: JULHO 2025)</SelectItem>
+                <SelectItem value="prefix-month">PREFIXO MÊS (ex: LEADS JULHO)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {tabPattern === 'month-year' ? (
+            <div className="space-y-2">
+              <Label htmlFor="tab-year">Ano das abas</Label>
+              <Select value={tabYear} onValueChange={setTabYear} disabled={isImporting}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {YEAR_OPTIONS.map(year => (
+                    <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Ex: "JANEIRO {tabYear}", "FEVEREIRO {tabYear}", ..., "DEZEMBRO {tabYear}"
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="tab-prefix">Prefixo das abas</Label>
+              <Input
+                id="tab-prefix"
+                value={tabPrefix}
+                onChange={(e) => setTabPrefix(e.target.value.toUpperCase())}
+                placeholder="LEADS"
+                disabled={isImporting}
+              />
+              <p className="text-xs text-muted-foreground">
+                Ex: "{tabPrefix} JANEIRO", "{tabPrefix} FEVEREIRO", etc.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
