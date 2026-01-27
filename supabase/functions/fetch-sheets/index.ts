@@ -250,7 +250,14 @@ Deno.serve(async (req) => {
         }
       }
 
-      fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${sheetParam}`;
+      // When sheetName is a tab name (not numeric), use gviz/tq endpoint which correctly respects sheet parameter
+      if (sheetName && !isNumericGid(sheetName)) {
+        fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+        console.log('Using gviz/tq endpoint for named tab:', sheetName);
+      } else {
+        // For numeric gid or no sheet specified, keep using export endpoint
+        fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${sheetParam}`;
+      }
     }
 
     console.log('Fetching from:', fetchUrl, 'delimiter:', delimiter === '\t' ? 'TAB' : 'COMMA');
@@ -294,6 +301,10 @@ Deno.serve(async (req) => {
     
     const data = parseDelimited(text, delimiter);
     console.log('Parsed rows:', data.length);
+    
+    // Debug log: show first few columns to verify correct tab was fetched
+    const columns = data.length > 0 ? Object.keys(data[0]) : [];
+    console.log('Returned columns sample:', columns.slice(0, 5));
 
     return new Response(
       JSON.stringify({ 

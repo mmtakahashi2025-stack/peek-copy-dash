@@ -329,16 +329,19 @@ export default function Leads() {
       .sort((a, b) => b.total - a.total);
   }, [records, gridMonth]);
 
-  // Generate year options dynamically from records + current year
+  // Generate year options with fixed range + records years
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
+    // Always include 5 years back to next year (fixed range)
+    const fixedRange = Array.from({ length: 7 }, (_, i) => currentYear - 5 + i);
+    
     const yearsFromRecords = records.map(r => {
       const date = parseISO(r.record_date);
       return date.getFullYear();
     });
     
-    // Include current year and all years from records
-    const uniqueYears = [...new Set([currentYear, ...yearsFromRecords])];
+    // Combine fixed range with years from records
+    const uniqueYears = [...new Set([...fixedRange, ...yearsFromRecords])];
     
     // Sort descending (most recent first)
     return uniqueYears.sort((a, b) => b - a);

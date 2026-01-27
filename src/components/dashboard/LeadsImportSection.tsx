@@ -23,13 +23,35 @@ interface ImportResult {
   details?: { tabName: string; count: number; error?: string }[];
 }
 
-// Check if column header is a date in DD/MM/YYYY format
-const isDateColumn = (col: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(col);
+// Check if column header is a date in DD/MM/YYYY or D/M/YYYY format (with or without leading zeros)
+const isDateColumn = (col: string) => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(col);
 
-// Convert DD/MM/YYYY to YYYY-MM-DD
+// Convert DD/MM/YYYY or D/M/YYYY to YYYY-MM-DD (with proper padding)
 const toISODate = (dateStr: string) => {
   const [day, month, year] = dateStr.split('/');
-  return `${year}-${month}-${day}`;
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+};
+
+// Validate that the returned data matches the expected month/year
+const validateTabData = (rows: Record<string, unknown>[], expectedMonth: number, expectedYear: number): { valid: boolean; actualMonth?: number; actualYear?: number } => {
+  if (rows.length === 0) return { valid: true };
+  
+  const columns = Object.keys(rows[0]);
+  const dateColumn = columns.find(col => isDateColumn(col));
+  
+  if (!dateColumn) return { valid: true }; // Can't validate without date column
+  
+  const parts = dateColumn.split('/');
+  if (parts.length !== 3) return { valid: true };
+  
+  const actualMonth = parseInt(parts[1], 10);
+  const actualYear = parseInt(parts[2], 10);
+  
+  return {
+    valid: actualMonth === expectedMonth && actualYear === expectedYear,
+    actualMonth,
+    actualYear
+  };
 };
 
 // Month names in Portuguese (uppercase for tabs)
@@ -307,6 +329,25 @@ export function LeadsImportSection() {
         if (!rows || rows.length === 0) {
           details.push({ tabName, count: 0, error: 'Aba não encontrada ou vazia' });
           continue;
+        }
+
+        // Parse tab name to get expected month/year for validation
+        const tabParts = tabName.split(' ');
+        if (tabParts.length === 2) {
+          const expectedMonthIndex = MONTHS_PT.indexOf(tabParts[0]);
+          const expectedYear = parseInt(tabParts[1], 10);
+          
+          if (expectedMonthIndex !== -1 && !isNaN(expectedYear)) {
+            const expectedMonth = expectedMonthIndex + 1; // 1-12
+            const validation = validateTabData(rows, expectedMonth, expectedYear);
+            
+            if (!validation.valid) {
+              const errorMsg = `Dados incorretos! Esperado: ${tabName}, Retornado: ${validation.actualMonth}/${validation.actualYear}`;
+              console.error(`[Leads Import] Tab validation failed:`, errorMsg);
+              details.push({ tabName, count: 0, error: errorMsg });
+              continue;
+            }
+          }
         }
 
         const records = processSheetData(rows);
