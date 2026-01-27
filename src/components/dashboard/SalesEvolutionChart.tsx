@@ -4,7 +4,8 @@ import { XAxis, YAxis, CartesianGrid, BarChart, Bar } from 'recharts';
 import { useSheetData, RawSaleRow } from '@/contexts/SheetDataContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface ChartConfig {
   [key: string]: {
@@ -94,7 +95,7 @@ const parseRowDate = (dataVenda: number | string): Date | null => {
 export function SalesEvolutionChart({ 
   filialId = 'todas', 
 }: SalesEvolutionChartProps) {
-  const { rawData } = useSheetData();
+  const { rawData, yearlyRawData, isLoadingYearly, loadYearlyData } = useSheetData();
   
   // Local state for month/year selection
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
@@ -109,16 +110,23 @@ export function SalesEvolutionChart({
     return Array.from({ length: 6 }, (_, i) => currentYear - 5 + i);
   }, []);
 
+  // Load yearly data when component mounts or selected year changes
+  useEffect(() => {
+    const yearsToLoad = [selectedYearForAnnual, selectedYearForAnnual - 1];
+    loadYearlyData(yearsToLoad);
+  }, [selectedYearForAnnual, loadYearlyData]);
+
   // Normalize filial ID for comparison
   const normalizeFilialId = (filial: string): string => {
     return filial.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
   };
 
   // Faturamento do ano selecionado com comparativo do ano anterior
+  // Uses yearlyRawData which loads complete years from cache
   const yearlyComparisonData = useMemo(() => {
     const filialFiltered = filialId === 'todas' 
-      ? rawData 
-      : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
+      ? yearlyRawData 
+      : yearlyRawData.filter(r => normalizeFilialId(r.Filial) === filialId);
 
     // Generate all 12 months of the selected year
     const months = meses.map((mes, index) => ({
@@ -152,7 +160,7 @@ export function SalesEvolutionChart({
         faturamentoAnterior: Math.round(monthlyFaturamento[previousKey] || 0),
       };
     });
-  }, [rawData, filialId, selectedYearForAnnual]);
+  }, [yearlyRawData, filialId, selectedYearForAnnual]);
 
   // Faturamento mensal (por dias) - usa mês/ano selecionado
   const dailyData = useMemo(() => {
@@ -233,10 +241,14 @@ export function SalesEvolutionChart({
             
             {/* Gráfico Anual */}
             <div className="h-[220px]">
-              {!hasYearlyData ? (
+              {isLoadingYearly ? (
+                <div className="h-full flex flex-col gap-2 p-4">
+                  <Skeleton className="h-full w-full" />
+                </div>
+              ) : !hasYearlyData ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground">
-                  {rawData.length === 0 
-                    ? 'Carregue dados para visualizar o gráfico'
+                  {yearlyRawData.length === 0 
+                    ? 'Carregando dados anuais...'
                     : `Nenhum dado encontrado para ${selectedYearForAnnual}`}
                 </div>
               ) : (
