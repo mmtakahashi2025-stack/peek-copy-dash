@@ -190,7 +190,7 @@ export function SalesEvolutionChart({
   const hasDailyData = dailyData.some(d => d.faturamento > 0);
 
   return (
-    <Card className="lg:col-span-2">
+    <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-lg font-semibold">Evolução de Vendas</CardTitle>
       </CardHeader>
@@ -202,7 +202,7 @@ export function SalesEvolutionChart({
           </TabsList>
           
           {/* Faturamento Anual com Comparativo do Ano Anterior */}
-          <TabsContent value="anual" className="h-[300px]">
+          <TabsContent value="anual" className="h-[280px]">
             {/* Seletor de Ano */}
             <div className="flex items-center gap-2 mb-4">
               <Select 
@@ -224,7 +224,7 @@ export function SalesEvolutionChart({
             </div>
             
             {/* Gráfico Anual */}
-            <div className="h-[240px]">
+            <div className="h-[220px]">
               {!hasYearlyData ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground">
                   {rawData.length === 0 
@@ -276,7 +276,7 @@ export function SalesEvolutionChart({
           </TabsContent>
           
           {/* Faturamento Mensal por Dias */}
-          <TabsContent value="mensal" className="h-[300px]">
+          <TabsContent value="mensal" className="h-[280px]">
             {/* Seletores de Mês e Ano */}
             <div className="flex gap-2 mb-4">
               <Select 
@@ -309,7 +309,7 @@ export function SalesEvolutionChart({
             </div>
             
             {/* Gráfico de barras diárias */}
-            <div className="h-[240px]">
+            <div className="h-[220px]">
               {!hasDailyData ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground">
                   {rawData.length === 0 
