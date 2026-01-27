@@ -1,9 +1,10 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { XAxis, YAxis, CartesianGrid, BarChart, Bar, ResponsiveContainer } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, BarChart, Bar } from 'recharts';
 import { useSheetData, RawSaleRow } from '@/contexts/SheetDataContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { useMemo } from 'react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useState, useMemo } from 'react';
 
 interface ChartConfig {
   [key: string]: {
@@ -14,8 +15,12 @@ interface ChartConfig {
 
 const chartConfig: ChartConfig = {
   faturamento: {
-    label: 'Faturamento',
+    label: 'Faturamento Atual',
     color: 'hsl(var(--primary))',
+  },
+  faturamentoAnterior: {
+    label: 'Período Anterior',
+    color: 'hsl(var(--muted-foreground))',
   },
 };
 
@@ -86,44 +91,32 @@ const parseRowDate = (dataVenda: number | string): Date | null => {
   return null;
 };
 
-// Filter by date range
-const filterByDateRange = (data: RawSaleRow[], dateFrom?: Date, dateTo?: Date): RawSaleRow[] => {
-  if (!dateFrom && !dateTo) return data;
-  
-  const dateToEndOfDay = dateTo 
-    ? new Date(dateTo.getFullYear(), dateTo.getMonth(), dateTo.getDate(), 23, 59, 59, 999)
-    : undefined;
-  
-  return data.filter(r => {
-    const rowDate = parseRowDate(r['Data Venda']);
-    if (!rowDate || isNaN(rowDate.getTime())) return false;
-    
-    if (dateFrom && rowDate < dateFrom) return false;
-    if (dateToEndOfDay && rowDate > dateToEndOfDay) return false;
-    
-    return true;
-  });
-};
-
 export function SalesEvolutionChart({ 
   filialId = 'todas', 
-  dateFrom,
-  dateTo,
 }: SalesEvolutionChartProps) {
   const { rawData } = useSheetData();
+  
+  // Local state for month/year selection
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+  // Generate year options dynamically
+  const yearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return Array.from({ length: 6 }, (_, i) => currentYear - 5 + i);
+  }, []);
 
   // Normalize filial ID for comparison
   const normalizeFilialId = (filial: string): string => {
     return filial.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
   };
 
-  // Faturamento últimos 12 meses
+  // Faturamento últimos 12 meses com comparativo do ano anterior
   const last12MonthsData = useMemo(() => {
     const filialFiltered = filialId === 'todas' 
       ? rawData 
       : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
 
-    // Get last 12 months from current date
     const now = new Date();
     const months: { year: number; month: number; label: string }[] = [];
     
@@ -151,35 +144,35 @@ export function SalesEvolutionChart({
       }
     });
 
-    return months.map(m => ({
-      mes: m.label,
-      faturamento: Math.round(monthlyFaturamento[`${m.year}-${m.month}`] || 0),
-    }));
+    // Return data with previous year comparison
+    return months.map(m => {
+      const currentKey = `${m.year}-${m.month}`;
+      const previousKey = `${m.year - 1}-${m.month}`;
+      
+      return {
+        mes: m.label,
+        faturamento: Math.round(monthlyFaturamento[currentKey] || 0),
+        faturamentoAnterior: Math.round(monthlyFaturamento[previousKey] || 0),
+      };
+    });
   }, [rawData, filialId]);
 
-  // Faturamento mensal (por dias) - usa o filtro de datas selecionado
+  // Faturamento mensal (por dias) - usa mês/ano selecionado
   const dailyData = useMemo(() => {
     const filialFiltered = filialId === 'todas' 
       ? rawData 
       : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
 
-    // Apply date filter
-    const filteredData = filterByDateRange(filialFiltered, dateFrom, dateTo);
-
-    // Get the month being displayed
-    const targetDate = dateFrom || new Date();
-    const targetYear = targetDate.getFullYear();
-    const targetMonth = targetDate.getMonth();
+    const targetYear = selectedYear;
+    const targetMonth = selectedMonth;
     const daysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
 
-    // Create array for all days in the month
     const dailyFaturamento: { [day: number]: number } = {};
     
-    filteredData.forEach(row => {
+    filialFiltered.forEach(row => {
       const rowDate = parseRowDate(row['Data Venda']);
       if (!rowDate || isNaN(rowDate.getTime())) return;
       
-      // Only include data from the target month
       if (rowDate.getFullYear() === targetYear && rowDate.getMonth() === targetMonth) {
         const day = rowDate.getDate();
         
@@ -190,21 +183,14 @@ export function SalesEvolutionChart({
       }
     });
 
-    // Build data for all days
     return Array.from({ length: daysInMonth }, (_, i) => ({
       dia: String(i + 1).padStart(2, '0'),
       faturamento: Math.round(dailyFaturamento[i + 1] || 0),
     }));
-  }, [rawData, filialId, dateFrom, dateTo]);
+  }, [rawData, filialId, selectedMonth, selectedYear]);
 
-  const hasLast12MonthsData = last12MonthsData.some(d => d.faturamento > 0);
+  const hasLast12MonthsData = last12MonthsData.some(d => d.faturamento > 0 || d.faturamentoAnterior > 0);
   const hasDailyData = dailyData.some(d => d.faturamento > 0);
-
-  // Get current month name for title
-  const currentMonthName = dateFrom 
-    ? mesesCompletos[dateFrom.getMonth()] 
-    : mesesCompletos[new Date().getMonth()];
-  const currentYear = dateFrom?.getFullYear() || new Date().getFullYear();
 
   return (
     <Card className="lg:col-span-2">
@@ -215,10 +201,10 @@ export function SalesEvolutionChart({
         <Tabs defaultValue="12meses" className="w-full">
           <TabsList className="mb-4">
             <TabsTrigger value="12meses">Últimos 12 Meses</TabsTrigger>
-            <TabsTrigger value="mensal">{currentMonthName}/{currentYear}</TabsTrigger>
+            <TabsTrigger value="mensal">{mesesCompletos[selectedMonth]}/{selectedYear}</TabsTrigger>
           </TabsList>
           
-          {/* Faturamento Últimos 12 Meses */}
+          {/* Faturamento Últimos 12 Meses com Comparativo */}
           <TabsContent value="12meses" className="h-[300px]">
             {!hasLast12MonthsData ? (
               <div className="h-full flex items-center justify-center text-muted-foreground">
@@ -249,9 +235,18 @@ export function SalesEvolutionChart({
                     content={<ChartTooltipContent />} 
                     formatter={(value: number) => formatCurrencyFull(value)}
                   />
+                  {/* Barra do período anterior (mais clara, atrás) */}
+                  <Bar 
+                    dataKey="faturamentoAnterior" 
+                    name="Período Anterior"
+                    fill="hsl(var(--muted-foreground))" 
+                    opacity={0.4}
+                    radius={[4, 4, 0, 0]}
+                  />
+                  {/* Barra do período atual (cor principal, frente) */}
                   <Bar 
                     dataKey="faturamento" 
-                    name="Faturamento"
+                    name="Faturamento Atual"
                     fill="hsl(var(--primary))" 
                     radius={[4, 4, 0, 0]}
                   />
@@ -262,46 +257,80 @@ export function SalesEvolutionChart({
           
           {/* Faturamento Mensal por Dias */}
           <TabsContent value="mensal" className="h-[300px]">
-            {!hasDailyData ? (
-              <div className="h-full flex items-center justify-center text-muted-foreground">
-                {rawData.length === 0 
-                  ? 'Carregue dados para visualizar o gráfico'
-                  : `Nenhum dado encontrado para ${currentMonthName}/${currentYear}`}
-              </div>
-            ) : (
-              <ChartContainer config={chartConfig} className="h-full w-full">
-                <BarChart data={dailyData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
-                  <XAxis 
-                    dataKey="dia" 
-                    tick={{ fontSize: 10 }}
-                    className="fill-muted-foreground"
-                    tickLine={false}
-                    axisLine={false}
-                    interval={1}
-                  />
-                  <YAxis 
-                    tick={{ fontSize: 11 }}
-                    tickFormatter={formatCurrency}
-                    className="fill-muted-foreground"
-                    tickLine={false}
-                    axisLine={false}
-                    width={60}
-                  />
-                  <ChartTooltip 
-                    content={<ChartTooltipContent />} 
-                    formatter={(value: number) => formatCurrencyFull(value)}
-                    labelFormatter={(label) => `Dia ${label}`}
-                  />
-                  <Bar 
-                    dataKey="faturamento" 
-                    name="Faturamento"
-                    fill="hsl(var(--primary))" 
-                    radius={[2, 2, 0, 0]}
-                  />
-                </BarChart>
-              </ChartContainer>
-            )}
+            {/* Seletores de Mês e Ano */}
+            <div className="flex gap-2 mb-4">
+              <Select 
+                value={String(selectedMonth)} 
+                onValueChange={(v) => setSelectedMonth(parseInt(v))}
+              >
+                <SelectTrigger className="w-[140px] h-8">
+                  <SelectValue placeholder="Mês" />
+                </SelectTrigger>
+                <SelectContent>
+                  {mesesCompletos.map((mes, index) => (
+                    <SelectItem key={index} value={String(index)}>{mes}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              
+              <Select 
+                value={String(selectedYear)} 
+                onValueChange={(v) => setSelectedYear(parseInt(v))}
+              >
+                <SelectTrigger className="w-[100px] h-8">
+                  <SelectValue placeholder="Ano" />
+                </SelectTrigger>
+                <SelectContent>
+                  {yearOptions.map((year) => (
+                    <SelectItem key={year} value={String(year)}>{year}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {/* Gráfico de barras diárias */}
+            <div className="h-[240px]">
+              {!hasDailyData ? (
+                <div className="h-full flex items-center justify-center text-muted-foreground">
+                  {rawData.length === 0 
+                    ? 'Carregue dados para visualizar o gráfico'
+                    : `Nenhum dado encontrado para ${mesesCompletos[selectedMonth]}/${selectedYear}`}
+                </div>
+              ) : (
+                <ChartContainer config={chartConfig} className="h-full w-full">
+                  <BarChart data={dailyData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
+                    <XAxis 
+                      dataKey="dia" 
+                      tick={{ fontSize: 10 }}
+                      className="fill-muted-foreground"
+                      tickLine={false}
+                      axisLine={false}
+                      interval={1}
+                    />
+                    <YAxis 
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={formatCurrency}
+                      className="fill-muted-foreground"
+                      tickLine={false}
+                      axisLine={false}
+                      width={60}
+                    />
+                    <ChartTooltip 
+                      content={<ChartTooltipContent />} 
+                      formatter={(value: number) => formatCurrencyFull(value)}
+                      labelFormatter={(label) => `Dia ${label}`}
+                    />
+                    <Bar 
+                      dataKey="faturamento" 
+                      name="Faturamento"
+                      fill="hsl(var(--primary))" 
+                      radius={[2, 2, 0, 0]}
+                    />
+                  </BarChart>
+                </ChartContainer>
+              )}
+            </div>
           </TabsContent>
         </Tabs>
       </CardContent>
