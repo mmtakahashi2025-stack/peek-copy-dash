@@ -44,8 +44,12 @@ export function useChartAggregates() {
         .order('year', { ascending: true })
         .order('month', { ascending: true });
 
-      // Filter by filial if specified
-      if (filialId && filialId !== 'todas') {
+      // Filter by filial - always apply filter to avoid duplication
+      if (filialId === 'todas' || !filialId) {
+        // When "todas" is selected, use the pre-calculated total
+        query = query.eq('filial', 'todas');
+      } else {
+        // When a specific filial is selected
         query = query.eq('filial', filialId);
       }
       
