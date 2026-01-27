@@ -62,9 +62,10 @@ export function useErpCache() {
     }
 
     try {
+      // Otimizado: seleciona apenas campos necessários (sem created_at)
       const { data, error } = await supabase
         .from('erp_cache')
-        .select('year, month, record_count, created_at, updated_at')
+        .select('year, month, record_count, updated_at')
         .order('year', { ascending: true })
         .order('month', { ascending: true });
 
@@ -124,11 +125,13 @@ export function useErpCache() {
     }
 
     try {
+      // Otimizado: usa limit(1) para hint de índice
       const { data, error } = await supabase
         .from('erp_cache')
         .select('data, record_count, updated_at')
         .eq('year', year)
         .eq('month', month)
+        .limit(1)
         .maybeSingle();
 
       if (error) {

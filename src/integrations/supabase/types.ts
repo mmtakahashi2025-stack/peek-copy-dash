@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           created_at: string
           data: Json
+          data_size: number | null
           id: string
           month: number
           record_count: number
@@ -28,6 +29,7 @@ export type Database = {
         Insert: {
           created_at?: string
           data: Json
+          data_size?: number | null
           id?: string
           month: number
           record_count?: number
@@ -38,6 +40,7 @@ export type Database = {
         Update: {
           created_at?: string
           data?: Json
+          data_size?: number | null
           id?: string
           month?: number
           record_count?: number
@@ -316,6 +319,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      current_user_is_admin: { Args: never; Returns: boolean }
       decrypt_erp_password: {
         Args: { encrypted_password: string }
         Returns: string

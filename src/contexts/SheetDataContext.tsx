@@ -244,12 +244,13 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     getCachedMonths,
     setMonthData,
     getMonthData,
+    getMultipleMonthsData,
     monthsToRefresh: MONTHS_TO_REFRESH_CONFIG,
     isAdmin: isAdminFromCache,
   } = useErpCache();
 
   // Load yearly data for the evolution chart (independent of dashboard filters)
-  // Uses parallel loading and intelligent caching to avoid duplicate fetches
+  // Uses BATCH loading with single query for maximum performance
   const loadYearlyData = useCallback(async (years: number[]) => {
     if (years.length === 0) return;
     
@@ -280,19 +281,18 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
         }
       }
       
-      // Fetch all months in PARALLEL (much faster than sequential)
-      const results = await Promise.all(
-        monthsToFetch.map(async ({ year, month }) => {
-          const data = await getMonthData(year, month);
-          if (data) {
-            console.log(`[YearlyData] Loaded ${year}-${month}: ${data.length} records`);
-          }
-          return data || [];
-        })
-      );
+      // OTIMIZADO: Usa batch loading com UMA única query em vez de N queries paralelas
+      const batchResult = await getMultipleMonthsData(monthsToFetch);
       
-      // Combine all results
-      const newData = results.flat();
+      // Combine all results from the batch
+      const newData: RawSaleRow[] = [];
+      for (const { year, month } of monthsToFetch) {
+        const key = `${year}-${month}`;
+        const monthData = batchResult.get(key);
+        if (monthData && monthData.length > 0) {
+          newData.push(...monthData);
+        }
+      }
       
       // Merge with existing data, removing duplicates by sale ID + date
       setYearlyRawData(prev => {
@@ -307,13 +307,13 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       // Mark years as loaded
       setLoadedYears(prev => new Set([...prev, ...newYears]));
       
-      console.log(`[YearlyData] Loaded ${newData.length} records for new years: ${newYears.join(', ')}`);
+      console.log(`[YearlyData] Loaded ${newData.length} records for new years: ${newYears.join(', ')} (batch query)`);
     } catch (error) {
       console.error('[YearlyData] Error loading yearly data:', error);
     } finally {
       setIsLoadingYearly(false);
     }
-  }, [getMonthData, loadedYears]);
+  }, [getMultipleMonthsData, loadedYears]);
 
   // Fetch system-wide ERP credentials (configured by admin)
   const refreshErpCredentials = useCallback(async () => {
