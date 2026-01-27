@@ -99,6 +99,9 @@ export function SalesEvolutionChart({
   // Local state for month/year selection
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  
+  // State for annual tab year selection
+  const [selectedYearForAnnual, setSelectedYearForAnnual] = useState(new Date().getFullYear());
 
   // Generate year options dynamically
   const yearOptions = useMemo(() => {
@@ -111,23 +114,17 @@ export function SalesEvolutionChart({
     return filial.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
   };
 
-  // Faturamento últimos 12 meses com comparativo do ano anterior
-  const last12MonthsData = useMemo(() => {
+  // Faturamento do ano selecionado com comparativo do ano anterior
+  const yearlyComparisonData = useMemo(() => {
     const filialFiltered = filialId === 'todas' 
       ? rawData 
       : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
 
-    const now = new Date();
-    const months: { year: number; month: number; label: string }[] = [];
-    
-    for (let i = 11; i >= 0; i--) {
-      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push({
-        year: date.getFullYear(),
-        month: date.getMonth(),
-        label: `${meses[date.getMonth()]}/${String(date.getFullYear()).slice(-2)}`,
-      });
-    }
+    // Generate all 12 months of the selected year
+    const months = meses.map((mes, index) => ({
+      month: index,
+      label: mes,
+    }));
 
     // Group data by year-month
     const monthlyFaturamento: { [key: string]: number } = {};
@@ -146,8 +143,8 @@ export function SalesEvolutionChart({
 
     // Return data with previous year comparison
     return months.map(m => {
-      const currentKey = `${m.year}-${m.month}`;
-      const previousKey = `${m.year - 1}-${m.month}`;
+      const currentKey = `${selectedYearForAnnual}-${m.month}`;
+      const previousKey = `${selectedYearForAnnual - 1}-${m.month}`;
       
       return {
         mes: m.label,
@@ -155,7 +152,7 @@ export function SalesEvolutionChart({
         faturamentoAnterior: Math.round(monthlyFaturamento[previousKey] || 0),
       };
     });
-  }, [rawData, filialId]);
+  }, [rawData, filialId, selectedYearForAnnual]);
 
   // Faturamento mensal (por dias) - usa mês/ano selecionado
   const dailyData = useMemo(() => {
@@ -189,7 +186,7 @@ export function SalesEvolutionChart({
     }));
   }, [rawData, filialId, selectedMonth, selectedYear]);
 
-  const hasLast12MonthsData = last12MonthsData.some(d => d.faturamento > 0 || d.faturamentoAnterior > 0);
+  const hasYearlyData = yearlyComparisonData.some(d => d.faturamento > 0 || d.faturamentoAnterior > 0);
   const hasDailyData = dailyData.some(d => d.faturamento > 0);
 
   return (
@@ -198,61 +195,84 @@ export function SalesEvolutionChart({
         <CardTitle className="text-lg font-semibold">Evolução de Vendas</CardTitle>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="12meses" className="w-full">
+        <Tabs defaultValue="anual" className="w-full">
           <TabsList className="mb-4">
-            <TabsTrigger value="12meses">Últimos 12 Meses</TabsTrigger>
+            <TabsTrigger value="anual">{selectedYearForAnnual}</TabsTrigger>
             <TabsTrigger value="mensal">{mesesCompletos[selectedMonth]}/{selectedYear}</TabsTrigger>
           </TabsList>
           
-          {/* Faturamento Últimos 12 Meses com Comparativo */}
-          <TabsContent value="12meses" className="h-[300px]">
-            {!hasLast12MonthsData ? (
-              <div className="h-full flex items-center justify-center text-muted-foreground">
-                {rawData.length === 0 
-                  ? 'Carregue dados para visualizar o gráfico'
-                  : 'Nenhum dado encontrado para os últimos 12 meses'}
-              </div>
-            ) : (
-              <ChartContainer config={chartConfig} className="h-full w-full">
-                <BarChart data={last12MonthsData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
-                  <XAxis 
-                    dataKey="mes" 
-                    tick={{ fontSize: 11 }}
-                    className="fill-muted-foreground"
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis 
-                    tick={{ fontSize: 11 }}
-                    tickFormatter={formatCurrency}
-                    className="fill-muted-foreground"
-                    tickLine={false}
-                    axisLine={false}
-                    width={60}
-                  />
-                  <ChartTooltip 
-                    content={<ChartTooltipContent />} 
-                    formatter={(value: number) => formatCurrencyFull(value)}
-                  />
-                  {/* Barra do período anterior (mais clara, atrás) */}
-                  <Bar 
-                    dataKey="faturamentoAnterior" 
-                    name="Período Anterior"
-                    fill="hsl(var(--muted-foreground))" 
-                    opacity={0.4}
-                    radius={[4, 4, 0, 0]}
-                  />
-                  {/* Barra do período atual (cor principal, frente) */}
-                  <Bar 
-                    dataKey="faturamento" 
-                    name="Faturamento Atual"
-                    fill="hsl(var(--primary))" 
-                    radius={[4, 4, 0, 0]}
-                  />
-                </BarChart>
-              </ChartContainer>
-            )}
+          {/* Faturamento Anual com Comparativo do Ano Anterior */}
+          <TabsContent value="anual" className="h-[300px]">
+            {/* Seletor de Ano */}
+            <div className="flex items-center gap-2 mb-4">
+              <Select 
+                value={String(selectedYearForAnnual)} 
+                onValueChange={(v) => setSelectedYearForAnnual(parseInt(v))}
+              >
+                <SelectTrigger className="w-[100px] h-8">
+                  <SelectValue placeholder="Ano" />
+                </SelectTrigger>
+                <SelectContent>
+                  {yearOptions.map((year) => (
+                    <SelectItem key={year} value={String(year)}>{year}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-sm text-muted-foreground">
+                vs {selectedYearForAnnual - 1}
+              </span>
+            </div>
+            
+            {/* Gráfico Anual */}
+            <div className="h-[240px]">
+              {!hasYearlyData ? (
+                <div className="h-full flex items-center justify-center text-muted-foreground">
+                  {rawData.length === 0 
+                    ? 'Carregue dados para visualizar o gráfico'
+                    : `Nenhum dado encontrado para ${selectedYearForAnnual}`}
+                </div>
+              ) : (
+                <ChartContainer config={chartConfig} className="h-full w-full">
+                  <BarChart data={yearlyComparisonData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
+                    <XAxis 
+                      dataKey="mes" 
+                      tick={{ fontSize: 11 }}
+                      className="fill-muted-foreground"
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis 
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={formatCurrency}
+                      className="fill-muted-foreground"
+                      tickLine={false}
+                      axisLine={false}
+                      width={60}
+                    />
+                    <ChartTooltip 
+                      content={<ChartTooltipContent />} 
+                      formatter={(value: number) => formatCurrencyFull(value)}
+                    />
+                    {/* Barra do ano anterior (mais clara, atrás) */}
+                    <Bar 
+                      dataKey="faturamentoAnterior" 
+                      name={`${selectedYearForAnnual - 1}`}
+                      fill="hsl(var(--muted-foreground))" 
+                      opacity={0.4}
+                      radius={[4, 4, 0, 0]}
+                    />
+                    {/* Barra do ano selecionado (cor principal, frente) */}
+                    <Bar 
+                      dataKey="faturamento" 
+                      name={`${selectedYearForAnnual}`}
+                      fill="hsl(var(--primary))" 
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ChartContainer>
+              )}
+            </div>
           </TabsContent>
           
           {/* Faturamento Mensal por Dias */}
