@@ -272,7 +272,7 @@ export function SalesEvolutionChart({
             <div className="flex flex-col gap-1 mb-4">
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-muted-foreground">Ano</span>
+                  <span className="text-sm font-medium text-muted-foreground">ANO</span>
                   <Select 
                     value={String(selectedYearForAnnual)} 
                     onValueChange={(v) => setSelectedYearForAnnual(parseInt(v))}
@@ -355,7 +355,7 @@ export function SalesEvolutionChart({
           <TabsContent value="mensal" className="h-[280px]">
             <div className="flex items-center gap-4 mb-4">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-muted-foreground">Mês</span>
+                <span className="text-sm font-medium text-muted-foreground">MÊS</span>
                 <Select 
                   value={String(selectedMonth)} 
                   onValueChange={(v) => setSelectedMonth(parseInt(v))}
@@ -372,7 +372,7 @@ export function SalesEvolutionChart({
               </div>
               
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-muted-foreground">Ano</span>
+                <span className="text-sm font-medium text-muted-foreground">ANO</span>
                 <Select 
                   value={String(selectedYear)} 
                   onValueChange={(v) => setSelectedYear(parseInt(v))}
