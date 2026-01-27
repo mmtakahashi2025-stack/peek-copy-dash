@@ -1,8 +1,9 @@
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { RawSaleRow } from '@/contexts/SheetDataContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserRole } from '@/hooks/useUserRole';
+import { useChartAggregates } from '@/hooks/useChartAggregates';
 
 // Cache configuration
 const MAX_CACHE_AGE_HOURS = 24;
@@ -39,6 +40,7 @@ function isMonthWithinRefreshRange(year: number, month: number, monthsToRefresh:
 export function useErpCache() {
   const { user } = useAuth();
   const { isAdmin } = useUserRole();
+  const { calculateAndSaveAggregates } = useChartAggregates();
   const [cacheMeta, setCacheMeta] = useState<CacheMeta>({
     totalEntries: 0,
     totalSizeMB: 0,
@@ -306,14 +308,16 @@ export function useErpCache() {
     return result;
   }, [user]);
 
-  // Save data for a specific month
+  // Save data for a specific month (also calculates and saves aggregates)
   const setMonthData = useCallback(async (year: number, month: number, data: RawSaleRow[]): Promise<boolean> => {
     const success = await saveMonthToCache(year, month, data);
     if (success) {
+      // Also calculate and save aggregates for fast chart loading
+      await calculateAndSaveAggregates(year, month, data);
       await updateCacheMeta();
     }
     return success;
-  }, [saveMonthToCache, updateCacheMeta]);
+  }, [saveMonthToCache, updateCacheMeta, calculateAndSaveAggregates]);
 
   // Get all cached data for a date range (combines monthly caches)
   const getCachedData = useCallback(async (dateFrom: Date, dateTo: Date): Promise<RawSaleRow[] | null> => {

@@ -86,6 +86,42 @@ export type Database = {
         }
         Relationships: []
       }
+      erp_monthly_aggregates: {
+        Row: {
+          colaborador: string | null
+          created_at: string
+          faturamento: number
+          filial: string
+          id: string
+          month: number
+          quantidade_vendas: number
+          updated_at: string
+          year: number
+        }
+        Insert: {
+          colaborador?: string | null
+          created_at?: string
+          faturamento?: number
+          filial?: string
+          id?: string
+          month: number
+          quantidade_vendas?: number
+          updated_at?: string
+          year: number
+        }
+        Update: {
+          colaborador?: string | null
+          created_at?: string
+          faturamento?: number
+          filial?: string
+          id?: string
+          month?: number
+          quantidade_vendas?: number
+          updated_at?: string
+          year?: number
+        }
+        Relationships: []
+      }
       excellence_criteria: {
         Row: {
           code: string
