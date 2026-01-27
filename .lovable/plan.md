@@ -1,68 +1,46 @@
 
-# Cache Global de ERP: Admin Busca, Todos Visualizam
+# Correção: Botão "Limpar" Cache Visível para Não-Admins
 
-## Status: ✅ IMPLEMENTADO
+## Problema Identificado
 
-## Resumo
+O botão "Limpar" está aparecendo para usuários não-admin mesmo após a alteração. Isso pode estar ocorrendo por dois motivos:
 
-Arquitetura de cache do ERP alterada para que:
-1. ✅ **Apenas admins** possam buscar dados da API do ERP
-2. ✅ **Todos os usuarios autenticados** possam visualizar o mesmo cache global
-3. ✅ Dados duplicados eliminados (consolidado de 3 usuarios para cache único)
+1. **Race condition**: O hook `useUserRole` inicia com `isLoading: true` e `isAdmin: false`, mas durante a renderização inicial, o estado pode não estar sincronizado corretamente
+2. **Publicação pendente**: A alteração pode estar apenas no ambiente de preview e ainda não foi publicada para produção
 
----
+## Solução
 
-## Alteracoes Implementadas
+Adicionar verificação do estado de carregamento (`isLoading`) para garantir que o botão só apareça após confirmar que o usuário é realmente admin.
 
-### 1. Migracao de Banco de Dados ✅
+## Alteração no Código
 
-- Removida constraint `user_id, year, month`
-- Adicionada constraint `year, month` (cache único por mês)
-- `user_id` agora é opcional (registra quem atualizou)
-- RLS policies atualizadas:
-  - SELECT: todos autenticados
-  - INSERT/UPDATE/DELETE: apenas admin
-- Dados duplicados limpos
+**Arquivo:** `src/components/dashboard/CacheInfoButton.tsx`
 
-### 2. useErpCache.ts ✅
-
-- Queries de leitura sem filtro `user_id`
-- Escrita verificada com `isAdmin`
-- `clearAllCache` apenas para admin
-
-### 3. SheetDataContext.tsx ✅
-
-- Exposto `isAdmin` no contexto
-- Auto-load de dados apenas para admin
-
-### 4. Dashboard.tsx ✅
-
-- Mensagem específica para não-admin sem dados
-- Reload automático apenas para admin
-
----
-
-## Fluxo de Dados
-
-```text
-+------------------+          +------------------+          +------------------+
-|     Admin        |  busca   |    API ERP       |  salva   |   erp_cache      |
-|   (isAdmin)      | -------> |                  | -------> | (tabela global)  |
-+------------------+          +------------------+          +------------------+
-                                                                    |
-                                                                    | leitura
-                                                                    v
-                                                            +------------------+
-                                                            |  Todos usuarios  |
-                                                            |  (autenticados)  |
-                                                            +------------------+
+**Linha 15 - Adicionar `isLoading`:**
+```tsx
+const { isAdmin, isLoading } = useUserRole();
 ```
 
----
+**Linha 72 - Adicionar verificação de loading:**
+```tsx
+{!isLoading && isAdmin && cacheMeta.totalEntries > 0 && (
+```
 
-## Beneficios Alcancados
+## Lógica
 
-1. ✅ **Menos requisicoes a API do ERP** - dados buscados uma vez, usados por todos
-2. ✅ **Consistencia** - todos veem os mesmos dados
-3. ✅ **Menor uso de armazenamento** - eliminada duplicacao entre usuarios
-4. ✅ **Seguranca** - apenas admin pode modificar dados de vendas
+| Situação | isLoading | isAdmin | Botão Aparece |
+|----------|-----------|---------|---------------|
+| Carregando | true | false | Não |
+| Usuário admin | false | true | Sim |
+| Usuário não-admin | false | false | Não |
+| Usuário sem role | false | false | Não |
+
+## Verificação Adicional
+
+Confirmado no banco de dados:
+- Apenas `jonasmachtk@gmail.com` tem role `admin`
+- O usuário `agencia5@grupotaroba.com.br` **não possui registro** na tabela `user_roles`, portanto `isAdmin = false`
+
+## Próximo Passo
+
+Após implementar a correção, será necessário **publicar** a aplicação para que as mudanças reflitam no ambiente de produção.
