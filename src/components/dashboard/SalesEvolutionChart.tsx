@@ -30,6 +30,7 @@ const chartConfig: ChartConfig = {
 
 const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 const mesesCompletos = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
 const formatCurrency = (value: number) => {
   if (value >= 1000000) {
@@ -93,6 +94,36 @@ const normalizeFilialId = (filial: string): string => {
   return filial.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
 };
 
+// Calculate weeks in a month
+const getWeeksInMonth = (year: number, month: number): { week: number; startDay: number; endDay: number; label: string }[] => {
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const weeks: { week: number; startDay: number; endDay: number; label: string }[] = [];
+  
+  let currentDay = 1;
+  let weekNum = 1;
+  
+  while (currentDay <= lastDay.getDate()) {
+    const weekStart = currentDay;
+    const dayOfWeek = new Date(year, month, currentDay).getDay();
+    // Week goes until Saturday (6) or end of month
+    const daysUntilSaturday = (6 - dayOfWeek + 7) % 7;
+    const weekEnd = Math.min(currentDay + daysUntilSaturday, lastDay.getDate());
+    
+    weeks.push({
+      week: weekNum,
+      startDay: weekStart,
+      endDay: weekEnd,
+      label: `Semana ${weekNum} (${weekStart}-${weekEnd})`
+    });
+    
+    currentDay = weekEnd + 1;
+    weekNum++;
+  }
+  
+  return weeks;
+};
+
 export function SalesEvolutionChart({ 
   filialId = 'todas',
   colaboradorId = 'todos',
@@ -106,7 +137,7 @@ export function SalesEvolutionChart({
   const { fetchAggregates, getYearlyChartData, isLoading: isLoadingAggregates } = useChartAggregates();
   
   // State
-  const [activeTab, setActiveTab] = useState<'anual' | 'mensal'>('anual');
+  const [activeTab, setActiveTab] = useState<'anual' | 'semana' | 'mensal'>('anual');
   const [selectedMonth, setSelectedMonth] = useState(() => 
     dateFrom ? dateFrom.getMonth() : new Date().getMonth()
   );
@@ -116,11 +147,20 @@ export function SalesEvolutionChart({
   const [selectedYearForAnnual, setSelectedYearForAnnual] = useState(() => 
     dateFrom ? dateFrom.getFullYear() : new Date().getFullYear()
   );
+  const [selectedWeek, setSelectedWeek] = useState(1);
+  const [selectedMonthForWeek, setSelectedMonthForWeek] = useState(() => 
+    dateFrom ? dateFrom.getMonth() : new Date().getMonth()
+  );
+  const [selectedYearForWeek, setSelectedYearForWeek] = useState(() => 
+    dateFrom ? dateFrom.getFullYear() : new Date().getFullYear()
+  );
   
   // Data states
   const [yearlyAggregates, setYearlyAggregates] = useState<MonthlyAggregate[]>([]);
   const [dailyData, setDailyData] = useState<{ dia: string; faturamento: number }[]>([]);
+  const [weeklyData, setWeeklyData] = useState<{ dia: string; diaSemana: string; faturamento: number }[]>([]);
   const [isLoadingDaily, setIsLoadingDaily] = useState(false);
+  const [isLoadingWeekly, setIsLoadingWeekly] = useState(false);
   
   // Track loaded years to avoid duplicate calls
   const loadedYearsRef = useRef<string>('');
@@ -132,9 +172,21 @@ export function SalesEvolutionChart({
       setSelectedMonth(dateFrom.getMonth());
       setSelectedYear(dateFrom.getFullYear());
       setSelectedYearForAnnual(dateFrom.getFullYear());
+      setSelectedMonthForWeek(dateFrom.getMonth());
+      setSelectedYearForWeek(dateFrom.getFullYear());
     }
     isInitialMountRef.current = false;
   }, [dateFrom]);
+  
+  // Get weeks for selected month
+  const weeksInMonth = useMemo(() => {
+    return getWeeksInMonth(selectedYearForWeek, selectedMonthForWeek);
+  }, [selectedYearForWeek, selectedMonthForWeek]);
+  
+  // Reset week selection when month changes
+  useEffect(() => {
+    setSelectedWeek(1);
+  }, [selectedMonthForWeek, selectedYearForWeek]);
   
   // Determine comparison year based on filter or default to previous year
   const previousYear = useMemo(() => {
@@ -233,12 +285,98 @@ export function SalesEvolutionChart({
     }
   }, [user, selectedYear, selectedMonth, filialId, colaboradorId]);
 
+  // Load weekly data ONLY when semana tab is active
+  const loadWeeklyData = useCallback(async () => {
+    if (!user) return;
+    
+    const currentWeekInfo = weeksInMonth.find(w => w.week === selectedWeek);
+    if (!currentWeekInfo) return;
+    
+    setIsLoadingWeekly(true);
+    try {
+      const { data, error } = await supabase
+        .from('erp_cache')
+        .select('data')
+        .eq('year', selectedYearForWeek)
+        .eq('month', selectedMonthForWeek + 1)
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) {
+        console.log(`[SalesEvolution] No data for ${selectedYearForWeek}-${selectedMonthForWeek + 1}`);
+        setWeeklyData([]);
+        return;
+      }
+
+      const rawData = data.data as unknown as RawSaleRow[];
+      if (!Array.isArray(rawData)) {
+        setWeeklyData([]);
+        return;
+      }
+
+      // Filter by filial and colaborador
+      let filtered = rawData;
+      
+      if (filialId !== 'todas') {
+        filtered = filtered.filter(r => normalizeFilialId(r.Filial) === filialId);
+      }
+      
+      if (colaboradorId && colaboradorId !== 'todos') {
+        filtered = filtered.filter(r => r.Emissor === colaboradorId);
+      }
+
+      // Calculate daily totals for the selected week
+      const dailyFaturamento: { [day: number]: number } = {};
+      
+      filtered.forEach(row => {
+        const rowDate = parseRowDate(row['Data Venda']);
+        if (!rowDate || isNaN(rowDate.getTime())) return;
+        
+        if (rowDate.getFullYear() === selectedYearForWeek && 
+            rowDate.getMonth() === selectedMonthForWeek) {
+          const day = rowDate.getDate();
+          if (day >= currentWeekInfo.startDay && day <= currentWeekInfo.endDay) {
+            if (row.Tipo !== 'PC') {
+              dailyFaturamento[day] = (dailyFaturamento[day] || 0) + (row.Líquido || 0);
+            }
+          }
+        }
+      });
+
+      // Build array for each day in the week
+      const weekData: { dia: string; diaSemana: string; faturamento: number }[] = [];
+      for (let day = currentWeekInfo.startDay; day <= currentWeekInfo.endDay; day++) {
+        const date = new Date(selectedYearForWeek, selectedMonthForWeek, day);
+        weekData.push({
+          dia: String(day).padStart(2, '0'),
+          diaSemana: diasSemana[date.getDay()],
+          faturamento: Math.round(dailyFaturamento[day] || 0),
+        });
+      }
+
+      setWeeklyData(weekData);
+      console.log(`[SalesEvolution] Weekly data loaded: ${weekData.length} days`);
+    } catch (error) {
+      console.error('[SalesEvolution] Error loading weekly data:', error);
+      setWeeklyData([]);
+    } finally {
+      setIsLoadingWeekly(false);
+    }
+  }, [user, selectedYearForWeek, selectedMonthForWeek, selectedWeek, weeksInMonth, filialId, colaboradorId]);
+
   // Lazy load daily data when tab changes to "mensal"
   useEffect(() => {
     if (activeTab === 'mensal') {
       loadDailyData();
     }
   }, [activeTab, loadDailyData]);
+
+  // Lazy load weekly data when tab changes to "semana"
+  useEffect(() => {
+    if (activeTab === 'semana') {
+      loadWeeklyData();
+    }
+  }, [activeTab, loadWeeklyData]);
 
   // Transform aggregates to chart data
   const yearlyComparisonData = useMemo(() => {
@@ -248,6 +386,7 @@ export function SalesEvolutionChart({
   const hasYearlyData = yearlyComparisonData.some(d => d.faturamento > 0 || d.faturamentoAnterior > 0);
   const hasPreviousYearData = yearlyComparisonData.some(d => d.faturamentoAnterior > 0);
   const hasDailyData = dailyData.some(d => d.faturamento > 0);
+  const hasWeeklyData = weeklyData.some(d => d.faturamento > 0);
   
   const comparisonLabel = compareEnabled ? `vs ${previousYear} (filtro)` : `vs ${previousYear}`;
 
@@ -260,16 +399,17 @@ export function SalesEvolutionChart({
         <Tabs 
           defaultValue="anual" 
           className="w-full"
-          onValueChange={(v) => setActiveTab(v as 'anual' | 'mensal')}
+          onValueChange={(v) => setActiveTab(v as 'anual' | 'semana' | 'mensal')}
         >
           <TabsList className="mb-4">
             <TabsTrigger value="anual">ANO</TabsTrigger>
+            <TabsTrigger value="semana">SEMANA</TabsTrigger>
             <TabsTrigger value="mensal">MÊS</TabsTrigger>
           </TabsList>
           
           {/* Faturamento Anual com Comparativo do Ano Anterior */}
-          <TabsContent value="anual" className="h-[280px]">
-            <div className="flex flex-col gap-1 mb-4">
+          <TabsContent value="anual" className="h-[320px]">
+            <div className="flex flex-col gap-2 mb-4">
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-muted-foreground">ANO</span>
@@ -291,6 +431,19 @@ export function SalesEvolutionChart({
                   comparado com {previousYear}
                 </span>
               </div>
+              
+              {/* Visual Legend */}
+              <div className="flex items-center gap-6">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3 h-3 rounded-sm bg-primary" />
+                  <span className="text-xs text-muted-foreground">{selectedYearForAnnual} (atual)</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3 h-3 rounded-sm bg-muted-foreground/40" />
+                  <span className="text-xs text-muted-foreground">{previousYear} (anterior)</span>
+                </div>
+              </div>
+              
               {hasYearlyData && !hasPreviousYearData && (
                 <p className="text-xs text-warning">
                   Dados de {previousYear} não disponíveis para comparação
@@ -298,7 +451,7 @@ export function SalesEvolutionChart({
               )}
             </div>
             
-            <div className="h-[220px]">
+            <div className="h-[240px]">
               {isLoadingAggregates ? (
                 <div className="h-full flex flex-col gap-2 p-4">
                   <Skeleton className="h-full w-full" />
@@ -351,8 +504,116 @@ export function SalesEvolutionChart({
             </div>
           </TabsContent>
           
+          {/* Faturamento Semanal por Dias */}
+          <TabsContent value="semana" className="h-[320px]">
+            <div className="flex flex-wrap items-center gap-4 mb-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-muted-foreground">SEMANA</span>
+                <Select 
+                  value={String(selectedWeek)} 
+                  onValueChange={(v) => setSelectedWeek(parseInt(v))}
+                >
+                  <SelectTrigger className="w-[180px] h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {weeksInMonth.map((week) => (
+                      <SelectItem key={week.week} value={String(week.week)}>
+                        {week.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-muted-foreground">MÊS</span>
+                <Select 
+                  value={String(selectedMonthForWeek)} 
+                  onValueChange={(v) => setSelectedMonthForWeek(parseInt(v))}
+                >
+                  <SelectTrigger className="w-[140px] h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {mesesCompletos.map((mes, index) => (
+                      <SelectItem key={index} value={String(index)}>{mes}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-muted-foreground">ANO</span>
+                <Select 
+                  value={String(selectedYearForWeek)} 
+                  onValueChange={(v) => setSelectedYearForWeek(parseInt(v))}
+                >
+                  <SelectTrigger className="w-[100px] h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {yearOptions.map((year) => (
+                      <SelectItem key={year} value={String(year)}>{year}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <div className="h-[240px]">
+              {isLoadingWeekly ? (
+                <div className="h-full flex flex-col gap-2 p-4">
+                  <Skeleton className="h-full w-full" />
+                </div>
+              ) : !hasWeeklyData ? (
+                <div className="h-full flex items-center justify-center text-muted-foreground">
+                  {`Nenhum dado encontrado para Semana ${selectedWeek} de ${mesesCompletos[selectedMonthForWeek]}/${selectedYearForWeek}`}
+                </div>
+              ) : (
+                <ChartContainer config={chartConfig} className="h-full w-full">
+                  <BarChart data={weeklyData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
+                    <XAxis 
+                      dataKey="diaSemana" 
+                      tick={{ fontSize: 11 }}
+                      className="fill-muted-foreground"
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis 
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={formatCurrency}
+                      className="fill-muted-foreground"
+                      tickLine={false}
+                      axisLine={false}
+                      width={60}
+                    />
+                    <ChartTooltip 
+                      content={<ChartTooltipContent />} 
+                      formatter={(value: number) => formatCurrencyFull(value)}
+                      labelFormatter={(label, payload) => {
+                        if (payload && payload[0]) {
+                          const data = payload[0].payload;
+                          return `${data.diaSemana}, dia ${data.dia}`;
+                        }
+                        return label;
+                      }}
+                    />
+                    <Bar 
+                      dataKey="faturamento" 
+                      name={`Semana ${selectedWeek}`}
+                      fill="hsl(var(--primary))" 
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ChartContainer>
+              )}
+            </div>
+          </TabsContent>
+          
           {/* Faturamento Mensal por Dias */}
-          <TabsContent value="mensal" className="h-[280px]">
+          <TabsContent value="mensal" className="h-[320px]">
             <div className="flex items-center gap-4 mb-4">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-muted-foreground">MÊS</span>
@@ -389,7 +650,7 @@ export function SalesEvolutionChart({
               </div>
             </div>
             
-            <div className="h-[220px]">
+            <div className="h-[240px]">
               {isLoadingDaily ? (
                 <div className="h-full flex flex-col gap-2 p-4">
                   <Skeleton className="h-full w-full" />

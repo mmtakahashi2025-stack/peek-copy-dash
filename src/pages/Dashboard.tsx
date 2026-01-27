@@ -223,17 +223,19 @@ export default function Dashboard() {
           )}
         </div>
         
-        {/* Chart and Rankings */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <SalesEvolutionChart 
-            filialId={filters.filial}
-            colaboradorId={filters.colaborador}
-            dateFrom={filters.dateFrom}
-            dateTo={filters.dateTo}
-            compareEnabled={filters.compareEnabled}
-            compareDateFrom={filters.compareDateFrom}
-            compareDateTo={filters.compareDateTo}
-          />
+        {/* Chart - Full Width */}
+        <SalesEvolutionChart 
+          filialId={filters.filial}
+          colaboradorId={filters.colaborador}
+          dateFrom={filters.dateFrom}
+          dateTo={filters.dateTo}
+          compareEnabled={filters.compareEnabled}
+          compareDateFrom={filters.compareDateFrom}
+          compareDateTo={filters.compareDateTo}
+        />
+        
+        {/* Rankings Side by Side */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <RankingCard colaboradores={colaboradores} rawData={rawData} />
           <ProductRankingCard produtos={produtos} rawData={rawData} />
         </div>
