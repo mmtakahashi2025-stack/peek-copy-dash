@@ -1,223 +1,172 @@
 
+# Plano: Corrigir Gráfico de Evolução de Vendas - Comparativo Anual
 
-# Plano Completo: Correções e Melhorias no Dashboard
+## Problema Identificado
 
-## Problemas a Resolver
+O gráfico de **Evolução de Vendas** mostra "Dados de 2025 não disponíveis para comparação" mesmo tendo todos os meses de 2025 no banco de dados.
 
-1. **Botao "ERP Online" visivel para nao-admin** - Ainda aparece para usuarios sem permissao
-2. **Dados nao aparecem para nao-admin** - Ficam presos na mensagem "Aguardando dados do ERP"
-3. **Evolucao de Vendas sem comparativo** - Nao mostra comparacao com ano anterior
-4. **Dados do ultimo mes ao logar** - Dashboard nao carrega automaticamente o ultimo mes
-5. **Identificacao dos dados visualizados** - Nao ha label indicando qual periodo/filtro esta sendo exibido
+### Causa Raiz
+O `rawData` usado pelo gráfico só contém os dados do **período filtrado no Dashboard** (por padrão: último mês completo = Dezembro/2025).
 
----
+Quando o usuário seleciona 2026 no gráfico e tenta comparar com 2025, o `rawData` só tem Dezembro/2025, então os outros 11 meses aparecem zerados, acionando a mensagem de "dados não disponíveis".
 
-## 1. Ocultar Botao "ERP Online" para Nao-Admin
-
-### Problema
-O `SheetConfigDialog` renderiza o botao "ERP Online/Offline" sem verificar se o usuario e admin.
-
-### Solucao
-Adicionar verificacao de role dentro do proprio componente como guard de seguranca.
-
-### Arquivo: `src/components/dashboard/SheetConfigDialog.tsx`
-
-**Linha 1-31 - Adicionar import e guard:**
-```tsx
-import { useUserRole } from '@/hooks/useUserRole';
-
-export function SheetConfigDialog() {
-  const { isAdmin } = useUserRole();
-  
-  // Guard: nao renderiza para nao-admin
-  if (!isAdmin) {
-    return null;
-  }
-  
-  // ... resto do componente
-}
+### Fluxo Atual (Problemático)
+```text
+Dashboard: filtro = Dez/2025
+    ↓
+loadErpData(Dez/2025)
+    ↓
+rawData = [apenas registros de Dez/2025]
+    ↓
+SalesEvolutionChart usa rawData
+    ↓
+Gráfico 2026 vs 2025: só encontra dados de Dez/2025
+    ↓
+"Dados de 2025 não disponíveis"
 ```
 
 ---
 
-## 2. Permitir Nao-Admin Ver Dados do Cache (mesmo expirados)
+## Solução Proposta
 
-### Problema
-O cache tem regra de expiracao de 24h para os ultimos 3 meses. Quando expira, `loadMonthFromCache` retorna `null`, tratando como "sem dados". Para nao-admin isso causa tela vazia.
+O gráfico de evolução de vendas precisa de **dados completos dos anos** para funcionar corretamente. Vamos criar uma fonte de dados separada para o gráfico que carrega os anos completos do cache, independente do filtro do Dashboard.
 
-### Solucao
-Modificar a logica de cache para:
-- **Admin**: continua respeitando expiracao (incentiva refresh)
-- **Nao-admin**: retorna dados mesmo expirados (stale read)
+### Abordagem: Dados Anuais Dedicados para o Gráfico
 
-### Arquivo: `src/hooks/useErpCache.ts`
+1. **Criar novo estado no SheetDataContext** para armazenar dados anuais completos (`yearlyRawData`)
+2. **Nova função `loadYearlyData`** que carrega anos inteiros do cache para o gráfico
+3. **SalesEvolutionChart usa `yearlyRawData`** em vez de `rawData`
 
-**Adicionar parametro `isAdmin` nas funcoes de cache:**
+---
+
+## Arquivos a Modificar
+
+### 1. `src/contexts/SheetDataContext.tsx`
+
+**Adicionar novo estado e função:**
 
 ```tsx
-// Adicionar parametro isAdmin em loadMonthFromCache
-const loadMonthFromCache = async (year: number, month: number, isAdmin: boolean): Promise<...> => {
-  // ... buscar dados do banco
+// Novo estado para dados anuais (usado pelo gráfico de evolução)
+const [yearlyRawData, setYearlyRawData] = useState<RawSaleRow[]>([]);
+
+// Função para carregar anos completos do cache
+const loadYearlyData = useCallback(async (years: number[]) => {
+  const allData: RawSaleRow[] = [];
   
-  // Verificar expiracao APENAS para admin
-  if (isAdmin && isWithinRefreshWindow(year, month)) {
-    const hoursAgo = (Date.now() - new Date(data.updated_at).getTime()) / (1000 * 60 * 60);
-    if (hoursAgo > MAX_CACHE_AGE_HOURS) {
-      // Para admin: cache expirado, precisa refresh
-      return null;
+  for (const year of years) {
+    for (let month = 1; month <= 12; month++) {
+      const monthData = await getMonthData(year, month);
+      if (monthData) {
+        allData.push(...monthData);
+      }
     }
   }
-  // Para nao-admin: sempre retorna dados se existirem
-  return data;
-};
+  
+  setYearlyRawData(allData);
+}, [getMonthData]);
 ```
 
-### Arquivo: `src/contexts/SheetDataContext.tsx`
-
-**Propagar `isAdmin` para as funcoes de cache:**
-
+**Expor no contexto:**
 ```tsx
-// Na funcao loadErpDataProgressive
-const cachedData = await getCachedData(dateFrom, dateTo, isAdmin);
-```
-
----
-
-## 3. Comparativo Ano Anterior na Evolucao de Vendas
-
-### Problema
-O grafico ja tem a estrutura para comparativo (`faturamentoAnterior`), mas o usuario relata que nao esta funcionando.
-
-### Analise
-Revisando o codigo, o comparativo JA EXISTE:
-- Linha 146-153: calcula `faturamentoAnterior` para ano anterior
-- Linha 258-264: renderiza barra do ano anterior com opacidade 40%
-- Linha 221-223: mostra label "vs {ano-1}"
-
-### Possivel Causa
-Se nao ha dados do ano anterior no cache, as barras ficam zeradas. Isso e esperado se o admin nunca carregou dados historicos.
-
-### Solucao
-Adicionar indicador visual quando nao houver dados do ano anterior para comparacao:
-
-### Arquivo: `src/components/dashboard/SalesEvolutionChart.tsx`
-
-**Adicionar verificacao e mensagem:**
-
-```tsx
-// Verificar se tem dados do ano anterior
-const hasPreviousYearData = yearlyComparisonData.some(d => d.faturamentoAnterior > 0);
-
-// Na UI, abaixo do seletor de ano:
-{!hasPreviousYearData && hasYearlyData && (
-  <p className="text-xs text-muted-foreground">
-    Dados de {selectedYearForAnnual - 1} nao disponiveis para comparacao
-  </p>
-)}
+value={{
+  // ... existentes
+  yearlyRawData,
+  loadYearlyData,
+}}
 ```
 
 ---
 
-## 4. Carregar Dados do Ultimo Mes ao Logar
+### 2. `src/hooks/useErpCache.ts`
 
-### Problema
-Dashboard inicia com filtro do mes atual (dia 1 ate hoje), mas pode nao ter dados. Usuario quer ver dados do ultimo mes completo automaticamente.
-
-### Solucao
-Alterar os filtros iniciais para carregar o ultimo mes completo por padrao.
-
-### Arquivo: `src/pages/Dashboard.tsx`
-
-**Linhas 31-41 - Alterar estado inicial dos filtros:**
+**Adicionar função `getMonthData`** (se não existir) para buscar dados de um mês específico do cache:
 
 ```tsx
-// Antes: mes atual (incompleto)
-dateFrom: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-dateTo: new Date(),
-
-// Depois: ultimo mes completo
-const lastMonthStart = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
-const lastMonthEnd = new Date(new Date().getFullYear(), new Date().getMonth(), 0);
-
-const [filters, setFilters] = useState<Filters>({
-  dateFrom: lastMonthStart,
-  dateTo: lastMonthEnd,
-  // ... resto igual
-});
+const getMonthData = useCallback(async (year: number, month: number): Promise<RawSaleRow[] | null> => {
+  const { data, error } = await supabase
+    .from('erp_cache')
+    .select('data')
+    .eq('year', year)
+    .eq('month', month)
+    .single();
+    
+  if (error || !data) return null;
+  return data.data as RawSaleRow[];
+}, []);
 ```
 
 ---
 
-## 5. Label Indicando Dados Visualizados
+### 3. `src/components/dashboard/SalesEvolutionChart.tsx`
 
-### Problema
-Usuario nao sabe qual periodo/filtro esta sendo exibido nos cards de KPI.
-
-### Solucao
-Adicionar um label acima da grid de KPIs mostrando o periodo e filial selecionados.
-
-### Arquivo: `src/pages/Dashboard.tsx`
-
-**Antes da linha 176 (grid de KPIs) - Adicionar label:**
+**Alterar para usar `yearlyRawData`:**
 
 ```tsx
-{/* Label de dados visualizados */}
-<div className="flex items-center gap-2 text-sm text-muted-foreground">
-  <span className="font-medium">Visualizando:</span>
-  <span>
-    {filters.dateFrom?.toLocaleDateString('pt-BR')} a {filters.dateTo?.toLocaleDateString('pt-BR')}
-  </span>
-  {filters.filial !== 'todas' && (
-    <>
-      <span className="text-muted-foreground/50">|</span>
-      <span>Filial: {filters.filial}</span>
-    </>
-  )}
-</div>
-```
-
----
-
-## 6. Corrigir Reload de Dados (Remover Dependencia de isConnected)
-
-### Problema
-O `useEffect` de reload depende de `isConnected`, mas para nao-admin isso pode impedir o carregamento.
-
-### Arquivo: `src/pages/Dashboard.tsx`
-
-**Linhas 114-119 - Remover dependencia de isConnected:**
-
-```tsx
-// Antes
-if (isConnected && filters.dateFrom && filters.dateTo) {
-
-// Depois: sempre tenta carregar quando filtros mudam
-if (filters.dateFrom && filters.dateTo && erpCredentials?.hasPassword) {
-  loadErpData(filters.dateFrom, filters.dateTo);
+export function SalesEvolutionChart({ filialId = 'todas' }) {
+  const { yearlyRawData, loadYearlyData } = useSheetData();
+  
+  // Carregar anos relevantes quando o componente monta ou ano selecionado muda
+  useEffect(() => {
+    const yearsToLoad = [selectedYearForAnnual, selectedYearForAnnual - 1];
+    loadYearlyData(yearsToLoad);
+  }, [selectedYearForAnnual, loadYearlyData]);
+  
+  // Usar yearlyRawData em vez de rawData
+  const yearlyComparisonData = useMemo(() => {
+    const filialFiltered = filialId === 'todas' 
+      ? yearlyRawData  // ← Alterado de rawData para yearlyRawData
+      : yearlyRawData.filter(r => normalizeFilialId(r.Filial) === filialId);
+    // ... resto igual
+  }, [yearlyRawData, filialId, selectedYearForAnnual]);
 }
 ```
 
 ---
 
-## Resumo das Alteracoes por Arquivo
+## Comportamento Esperado Após Implementação
 
-| Arquivo | Alteracao |
-|---------|-----------|
-| `src/components/dashboard/SheetConfigDialog.tsx` | Adicionar guard `if (!isAdmin) return null` |
-| `src/hooks/useErpCache.ts` | Parametro `isAdmin` nas funcoes de cache; nao expirar para nao-admin |
-| `src/contexts/SheetDataContext.tsx` | Propagar `isAdmin` para funcoes de cache |
-| `src/pages/Dashboard.tsx` | (1) Filtro inicial = ultimo mes completo; (2) Label de periodo acima dos KPIs; (3) Reload sem depender de isConnected |
-| `src/components/dashboard/SalesEvolutionChart.tsx` | Mensagem quando nao houver dados do ano anterior |
+| Cenário | Antes | Depois |
+|---------|-------|--------|
+| Gráfico 2026 vs 2025 | "Dados de 2025 não disponíveis" | Mostra barras comparativas de todos os meses |
+| Filtro Dashboard: Dez/2025 | Afeta gráfico de evolução | Não afeta - gráfico tem dados próprios |
+| Cache com anos incompletos | Mostra mensagem de erro | Mostra dados disponíveis, omite meses sem dados |
 
 ---
 
-## Resultado Esperado
+## Fluxo Após Correção
 
-| Funcionalidade | Antes | Depois |
-|----------------|-------|--------|
-| Botao ERP para nao-admin | Visivel | Oculto |
-| Dados para nao-admin | "Aguardando dados" | Exibe dados do cache (mesmo antigos) |
-| Comparativo ano anterior | Ja existe, mas sem feedback | Mensagem explicativa se nao houver dados |
-| Filtro inicial | Mes atual (incompleto) | Ultimo mes completo |
-| Identificacao de dados | Nenhuma | Label: "Visualizando: DD/MM/AAAA a DD/MM/AAAA" |
+```text
+Dashboard: filtro = Dez/2025
+    ↓
+loadErpData(Dez/2025)
+    ↓
+rawData = [registros de Dez/2025] ← usado pelos KPIs e rankings
 
+SalesEvolutionChart monta
+    ↓
+loadYearlyData([2026, 2025])
+    ↓
+yearlyRawData = [todos os registros de 2025 + 2026 do cache]
+    ↓
+Gráfico 2026 vs 2025: encontra todos os meses
+    ↓
+Barras comparativas funcionando!
+```
+
+---
+
+## Otimizações Adicionais
+
+1. **Cache local no componente**: Evitar recarregar anos já carregados
+2. **Loading state**: Mostrar skeleton enquanto carrega dados anuais
+3. **Memo dos anos**: Só recarregar quando o ano selecionado mudar de verdade
+
+---
+
+## Resumo de Alterações
+
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/hooks/useErpCache.ts` | Adicionar `getMonthData()` para buscar mês específico |
+| `src/contexts/SheetDataContext.tsx` | Adicionar `yearlyRawData` e `loadYearlyData()` |
+| `src/components/dashboard/SalesEvolutionChart.tsx` | Usar `yearlyRawData` e chamar `loadYearlyData` no mount |
