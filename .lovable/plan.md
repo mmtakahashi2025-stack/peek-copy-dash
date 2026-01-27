@@ -1,304 +1,231 @@
 
-# Revisao Completa: Modulo de Evolucao de Vendas
+# Plano: Tooltips Interativos nos Rankings
 
-## Problemas Identificados
+## Funcionalidade
 
-### 1. Grafico Mensal (Vendas por Dia) - Fonte de Dados Incorreta
-**Linha 209-211 do SalesEvolutionChart.tsx:**
-```tsx
-const dailyData = useMemo(() => {
-  const filialFiltered = filialId === 'todas' 
-    ? rawData    // PROBLEMA: usa rawData do Dashboard
-    : rawData.filter(...)
-```
+Adicionar tooltips informativos que aparecem ao posicionar o mouse sobre os itens dos rankings:
 
-O grafico mensal usa `rawData` (dados filtrados pelo Dashboard) em vez de `yearlyRawData` (cache completo). Quando o Dashboard esta filtrado para Janeiro/2026, e o usuario seleciona Dezembro/2025 no grafico, nao encontra dados.
-
-### 2. Carregamento de Anos Incompleto
-O `loadYearlyData` so carrega os anos do grafico anual (`selectedYearForAnnual` e `selectedYearForAnnual - 1`), mas ignora o ano selecionado no grafico mensal (`selectedYear`).
-
-### 3. Carregamento Sequencial Lento
-Cada mes e buscado sequencialmente (um apos o outro), tornando o carregamento de 24 meses muito lento (~24 requisicoes sequenciais).
+1. **Produtos Mais Vendidos**: Ao passar o mouse sobre um produto, mostrar os **3 maiores vendedores** daquele produto específico
+2. **Ranking de Colaboradores**: Ao passar o mouse sobre um colaborador, mostrar os **3 produtos mais vendidos** por ele
 
 ---
 
-## Solucao Proposta
-
-### Arquitetura Otimizada
+## Arquitetura da Solução
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│                    SalesEvolutionChart                       │
+│                     Dashboard.tsx                            │
 │  ┌─────────────────┐         ┌─────────────────┐            │
-│  │   Aba Anual     │         │   Aba Mensal    │            │
-│  │  (12 meses)     │         │  (dias do mes)  │            │
+│  │ ProductRanking  │         │  RankingCard    │            │
+│  │ + rawData prop  │         │ + rawData prop  │            │
 │  └────────┬────────┘         └────────┬────────┘            │
 │           │                           │                      │
-│           └──────────┬────────────────┘                      │
-│                      ▼                                       │
-│              yearlyRawData                                   │
-│           (cache unificado)                                  │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────┐
-│                  loadYearlyData()                            │
-│        Carrega anos em PARALELO do banco                     │
-│   (selectedYearForAnnual, selectedYearForAnnual-1,          │
-│    selectedYear do grafico mensal)                           │
-└──────────────────────────────────────────────────────────────┘
+│           ▼                           ▼                      │
+│   HoverCard com                HoverCard com                 │
+│   Top 3 Vendedores             Top 3 Produtos                │
+│   do Produto                   do Colaborador                │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Alteracoes por Arquivo
+## Arquivos a Modificar
 
-### 1. `src/components/dashboard/SalesEvolutionChart.tsx`
+### 1. `src/components/dashboard/ProductRankingCard.tsx`
 
-#### 1.1 Corrigir Fonte de Dados do Grafico Mensal
-Alterar `dailyData` para usar `yearlyRawData`:
-
-```tsx
-// ANTES (linha 208-237)
-const dailyData = useMemo(() => {
-  const filialFiltered = filialId === 'todas' 
-    ? rawData    // ERRADO
-    : rawData.filter(r => normalizeFilialId(r.Filial) === filialId);
-  ...
-}, [rawData, filialId, selectedMonth, selectedYear]);
-
-// DEPOIS
-const dailyData = useMemo(() => {
-  const filialFiltered = filialId === 'todas' 
-    ? yearlyRawData    // CORRETO
-    : yearlyRawData.filter(r => normalizeFilialId(r.Filial) === filialId);
-  ...
-}, [yearlyRawData, filialId, selectedMonth, selectedYear]);
-```
-
-#### 1.2 Incluir Ano do Grafico Mensal no Carregamento
-Atualizar o useEffect para carregar todos os anos necessarios:
+**Alteracoes:**
+- Adicionar prop `rawData` para calcular vendedores por produto
+- Envolver cada item do ranking com `HoverCard` do Radix
+- Calcular os 3 maiores vendedores para o produto quando hover
 
 ```tsx
-// ANTES (linhas 131-143)
-const yearsKey = `${selectedYearForAnnual}-${selectedYearForAnnual - 1}`;
-const yearsToLoad = [selectedYearForAnnual, selectedYearForAnnual - 1];
+// Nova interface e prop
+interface ProductRankingCardProps {
+  produtos: ProdutoData[];
+  rawData: RawSaleRow[];  // Nova prop
+}
 
-// DEPOIS - Incluir ano do grafico mensal
-const yearsSet = new Set([
-  selectedYearForAnnual,
-  selectedYearForAnnual - 1,
-  selectedYear,  // Ano selecionado no grafico mensal
-]);
-const yearsToLoad = Array.from(yearsSet).sort((a, b) => b - a);
-const yearsKey = yearsToLoad.join('-');
-```
+// Funcao para calcular top vendedores de um produto
+function getTopSellersForProduct(rawData: RawSaleRow[], productName: string): { nome: string; quantidade: number }[] {
+  const byEmissor: Record<string, number> = {};
+  
+  rawData
+    .filter(r => r.Item === productName)
+    .forEach(row => {
+      const emissor = row.Emissor;
+      if (!emissor) return;
+      byEmissor[emissor] = (byEmissor[emissor] || 0) + (row.Quantidade || 0);
+    });
+  
+  return Object.entries(byEmissor)
+    .map(([nome, quantidade]) => ({ nome, quantidade }))
+    .sort((a, b) => b.quantidade - a.quantidade)
+    .slice(0, 3);
+}
 
-Adicionar `selectedYear` as dependencias:
-
-```tsx
-}, [selectedYearForAnnual, selectedYear, loadYearlyData, user, authLoading, yearlyRawData.length]);
-```
-
-#### 1.3 Adicionar Loading State ao Grafico Mensal
-
-```tsx
-// ANTES (linha 375)
-{!hasDailyData ? (
-  <div className="h-full flex items-center justify-center text-muted-foreground">
-    {rawData.length === 0 
-      ? 'Carregue dados para visualizar o grafico'
-      : `Nenhum dado encontrado...`}
-  </div>
-) : (...)}
-
-// DEPOIS - Adicionar skeleton durante loading
-{isLoadingYearly ? (
-  <div className="h-full flex flex-col gap-2 p-4">
-    <Skeleton className="h-full w-full" />
-  </div>
-) : !hasDailyData ? (
-  <div className="h-full flex items-center justify-center text-muted-foreground">
-    {yearlyRawData.length === 0 
-      ? 'Carregando dados...'
-      : `Nenhum dado encontrado para ${mesesCompletos[selectedMonth]}/${selectedYear}`}
-  </div>
-) : (...)}
+// No JSX, envolver cada item:
+<HoverCard openDelay={200} closeDelay={100}>
+  <HoverCardTrigger asChild>
+    <div className="flex items-center gap-4 px-6 py-3 hover:bg-muted/50 transition-colors cursor-pointer">
+      {/* conteudo existente do item */}
+    </div>
+  </HoverCardTrigger>
+  <HoverCardContent className="w-64" side="left">
+    <div className="space-y-2">
+      <h4 className="text-sm font-semibold">Top Vendedores</h4>
+      {topSellers.map((seller, i) => (
+        <div key={i} className="flex justify-between text-sm">
+          <span>{i + 1}. {seller.nome}</span>
+          <span className="text-muted-foreground">{seller.quantidade} un.</span>
+        </div>
+      ))}
+    </div>
+  </HoverCardContent>
+</HoverCard>
 ```
 
 ---
 
-### 2. `src/contexts/SheetDataContext.tsx`
+### 2. `src/components/dashboard/RankingCard.tsx`
 
-#### 2.1 Otimizar Carregamento Paralelo
-Modificar `loadYearlyData` para buscar meses em paralelo (mais rapido):
-
-```tsx
-const loadYearlyData = useCallback(async (years: number[]) => {
-  if (years.length === 0) return;
-  
-  const { data: { user: currentUser } } = await supabase.auth.getUser();
-  if (!currentUser) {
-    console.log('[YearlyData] User not available yet, skipping load');
-    return;
-  }
-  
-  setIsLoadingYearly(true);
-  
-  try {
-    // Gerar lista de todos os meses a buscar
-    const monthsToFetch: { year: number; month: number }[] = [];
-    for (const year of years) {
-      for (let month = 1; month <= 12; month++) {
-        monthsToFetch.push({ year, month });
-      }
-    }
-    
-    // Buscar todos os meses em PARALELO (muito mais rapido)
-    const results = await Promise.all(
-      monthsToFetch.map(async ({ year, month }) => {
-        const data = await getMonthData(year, month);
-        if (data) {
-          console.log(`[YearlyData] Loaded ${year}-${month}: ${data.length} records`);
-        }
-        return data || [];
-      })
-    );
-    
-    // Combinar todos os resultados
-    const allData = results.flat();
-    setYearlyRawData(allData);
-    console.log(`[YearlyData] Total: ${allData.length} records for years: ${years.join(', ')}`);
-  } catch (error) {
-    console.error('[YearlyData] Error loading yearly data:', error);
-  } finally {
-    setIsLoadingYearly(false);
-  }
-}, [getMonthData]);
-```
-
-#### 2.2 Adicionar Cache Inteligente de Anos
-Evitar recarregar anos ja carregados:
+**Alteracoes:**
+- Adicionar prop `rawData` para calcular produtos por colaborador
+- Envolver cada item com `HoverCard`
+- Calcular os 3 produtos mais vendidos pelo colaborador quando hover
 
 ```tsx
-// Novo estado para rastrear anos ja carregados
-const [loadedYears, setLoadedYears] = useState<Set<number>>(new Set());
+// Nova interface e prop
+interface RankingCardProps {
+  colaboradores: Colaborador[];
+  rawData: RawSaleRow[];  // Nova prop
+}
 
-const loadYearlyData = useCallback(async (years: number[]) => {
-  // Filtrar apenas anos que ainda nao foram carregados
-  const newYears = years.filter(y => !loadedYears.has(y));
+// Funcao para calcular top produtos de um colaborador
+function getTopProductsForSeller(rawData: RawSaleRow[], sellerName: string): { nome: string; quantidade: number }[] {
+  const byProduto: Record<string, number> = {};
   
-  if (newYears.length === 0) {
-    console.log('[YearlyData] All years already loaded:', years.join(', '));
-    return;
-  }
+  rawData
+    .filter(r => r.Emissor === sellerName)
+    .forEach(row => {
+      const item = row.Item;
+      if (!item) return;
+      byProduto[item] = (byProduto[item] || 0) + (row.Quantidade || 0);
+    });
   
-  // ... buscar apenas newYears ...
-  
-  // Mesclar novos dados com dados existentes
-  setYearlyRawData(prev => {
-    const combined = [...prev, ...allData];
-    // Remover duplicatas por ID de venda + data
-    const unique = Array.from(
-      new Map(combined.map(r => [`${r['Venda #']}-${r['Data Venda']}`, r])).values()
-    );
-    return unique;
-  });
-  
-  // Marcar anos como carregados
-  setLoadedYears(prev => new Set([...prev, ...newYears]));
-}, [getMonthData, loadedYears]);
+  return Object.entries(byProduto)
+    .map(([nome, quantidade]) => ({ nome, quantidade }))
+    .sort((a, b) => b.quantidade - a.quantidade)
+    .slice(0, 3);
+}
+
+// No JSX, envolver cada item:
+<HoverCard openDelay={200} closeDelay={100}>
+  <HoverCardTrigger asChild>
+    <div className="flex items-center gap-4 px-6 py-3 hover:bg-muted/50 transition-colors cursor-pointer">
+      {/* conteudo existente do colaborador */}
+    </div>
+  </HoverCardTrigger>
+  <HoverCardContent className="w-72" side="left">
+    <div className="space-y-2">
+      <h4 className="text-sm font-semibold">Top Produtos Vendidos</h4>
+      {topProducts.map((product, i) => (
+        <div key={i} className="flex justify-between text-sm">
+          <span className="truncate flex-1">{i + 1}. {product.nome}</span>
+          <span className="text-muted-foreground ml-2">{product.quantidade} un.</span>
+        </div>
+      ))}
+    </div>
+  </HoverCardContent>
+</HoverCard>
 ```
 
 ---
 
-### 3. `src/hooks/useErpCache.ts`
+### 3. `src/pages/Dashboard.tsx`
 
-#### 3.1 Adicionar Funcao de Busca em Lote
-Nova funcao para buscar multiplos meses de uma vez (mais eficiente):
+**Alteracoes:**
+- Passar `rawData` como prop para ambos os componentes de ranking
 
 ```tsx
-// Buscar multiplos meses de uma vez
-const getMultipleMonthsData = useCallback(async (
-  months: { year: number; month: number }[]
-): Promise<Map<string, RawSaleRow[]>> => {
-  let currentUser = user;
-  if (!currentUser) {
-    const { data } = await supabase.auth.getUser();
-    currentUser = data.user;
-  }
-  
-  if (!currentUser) return new Map();
-  
-  const result = new Map<string, RawSaleRow[]>();
-  
-  // Buscar todos os meses de uma unica query
-  const { data, error } = await supabase
-    .from('erp_cache')
-    .select('year, month, data, record_count')
-    .or(months.map(m => `and(year.eq.${m.year},month.eq.${m.month})`).join(','));
-  
-  if (error || !data) {
-    console.error('[Cache] Error loading multiple months:', error);
-    return result;
-  }
-  
-  for (const row of data) {
-    const key = `${row.year}-${row.month}`;
-    const rawData = row.data as unknown;
-    if (Array.isArray(rawData)) {
-      result.set(key, rawData as RawSaleRow[]);
-      console.log(`[Cache] Batch loaded ${key}: ${row.record_count} records`);
-    }
-  }
-  
-  return result;
-}, [user]);
+// Linha 236-237, adicionar rawData:
+<RankingCard colaboradores={colaboradores} rawData={rawData} />
+<ProductRankingCard produtos={produtos} rawData={rawData} />
+```
+
+---
+
+## Detalhes Tecnicos
+
+### Componente HoverCard
+Ja existe no projeto: `src/components/ui/hover-card.tsx`
+
+```tsx
+import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
+```
+
+### Performance
+- Os calculos sao feitos apenas quando o usuario passa o mouse (on-demand)
+- Usando `useMemo` dentro do map para evitar recalculos desnecessarios
+- HoverCard tem `openDelay` de 200ms para evitar ativacoes acidentais
+
+### UX
+- Posicionamento do tooltip: `side="left"` para nao sobrepor o ranking
+- Delay de abertura: 200ms (rapido mas evita flicker)
+- Delay de fechamento: 100ms (permite mover para o tooltip se necessario)
+- Truncate em nomes longos de produtos
+
+---
+
+## Exemplo Visual
+
+**Produto Mais Vendido - Hover:**
+```text
+┌─────────────────────────────────────────┐
+│ 1. Ingresso Cataratas   │  1.234 un.   │ ← Mouse aqui
+└─────────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────┐
+│  Top Vendedores          │
+│  ────────────────────    │
+│  1. Joao Silva   450 un. │
+│  2. Maria Lima   380 un. │
+│  3. Pedro Costa  205 un. │
+└──────────────────────────┘
+```
+
+**Colaborador - Hover:**
+```text
+┌─────────────────────────────────────────┐
+│ 1. JS  Joao Silva  │  120 vendas       │ ← Mouse aqui
+└─────────────────────────────────────────┘
+       │
+       ▼
+┌────────────────────────────────────┐
+│  Top Produtos Vendidos             │
+│  ────────────────────────────      │
+│  1. Ingresso Cataratas   450 un.   │
+│  2. Passeio Itaipu       280 un.   │
+│  3. Combo Familia        150 un.   │
+└────────────────────────────────────┘
 ```
 
 ---
 
 ## Resumo das Alteracoes
 
-| Arquivo | Alteracao | Impacto |
-|---------|-----------|---------|
-| `SalesEvolutionChart.tsx` | Usar `yearlyRawData` no grafico mensal | Corrige "dados nao encontrados" |
-| `SalesEvolutionChart.tsx` | Incluir `selectedYear` no carregamento | Garante dados para qualquer mes selecionado |
-| `SalesEvolutionChart.tsx` | Adicionar skeleton no grafico mensal | Melhor UX durante loading |
-| `SheetDataContext.tsx` | Carregamento paralelo com `Promise.all` | 5-10x mais rapido |
-| `SheetDataContext.tsx` | Cache de anos carregados | Evita requisicoes duplicadas |
-| `useErpCache.ts` | Funcao de busca em lote | Menos requisicoes ao banco |
+| Arquivo | Alteracao |
+|---------|-----------|
+| `ProductRankingCard.tsx` | Adicionar HoverCard com top 3 vendedores por produto |
+| `RankingCard.tsx` | Adicionar HoverCard com top 3 produtos por colaborador |
+| `Dashboard.tsx` | Passar `rawData` para os componentes de ranking |
 
 ---
 
 ## Resultado Esperado
 
-| Metrica | Antes | Depois |
-|---------|-------|--------|
-| Tempo de carregamento (24 meses) | ~24 segundos | ~2-3 segundos |
-| Grafico mensal Dez/2025 com filtro Jan/2026 | "Dados nao encontrados" | Mostra barras diarias |
-| Trocar ano no grafico mensal | Demora ou falha | Instantaneo (cache) |
-| Requisicoes ao banco por ano | 12 sequenciais | 1 batch ou paralelo |
-
----
-
-## Fluxo Corrigido
-
-```text
-Usuario abre Dashboard (filtro: Jan/2026)
-    │
-    ├─▶ rawData = [registros Jan/2026] (usado por KPIs)
-    │
-    └─▶ SalesEvolutionChart monta
-           │
-           ├─▶ loadYearlyData([2026, 2025]) em PARALELO
-           │      └─▶ yearlyRawData = [~130.000 registros]
-           │
-           ├─▶ Aba Anual: usa yearlyRawData ✓
-           │
-           └─▶ Aba Mensal: usa yearlyRawData ✓
-                  │
-                  └─▶ Usuario seleciona Dez/2025
-                         │
-                         └─▶ Encontra dados! Barras aparecem ✓
-```
+| Interacao | Antes | Depois |
+|-----------|-------|--------|
+| Hover em produto | Apenas highlight | Mostra 3 maiores vendedores |
+| Hover em colaborador | Apenas highlight | Mostra 3 produtos mais vendidos |
+| Performance | - | Calculo on-demand, sem impacto no carregamento |
