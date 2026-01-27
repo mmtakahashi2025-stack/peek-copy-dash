@@ -109,6 +109,7 @@ export function useErpCache() {
   }, [updateCacheMeta]);
 
   // Load a single month from Supabase cache (global cache - no user_id filter)
+  // For non-admin users, ignore expiration and return stale data
   const loadMonthFromCache = useCallback(async (year: number, month: number): Promise<MonthlyCacheEntry | null> => {
     if (!user) return null;
 
@@ -131,9 +132,10 @@ export function useErpCache() {
       const now = Date.now();
       const maxAge = MAX_CACHE_AGE_HOURS * 60 * 60 * 1000;
 
-      // Check if expired (only for months within refresh range)
-      if (isMonthWithinRefreshRange(year, month) && now - timestamp > maxAge) {
-        console.log(`[Cache] Month ${year}-${month} expired (within refresh range)`);
+      // Check if expired (only for ADMINS and months within refresh range)
+      // Non-admin users always get cached data even if expired (stale read)
+      if (isAdmin && isMonthWithinRefreshRange(year, month) && now - timestamp > maxAge) {
+        console.log(`[Cache] Month ${year}-${month} expired (within refresh range, admin mode)`);
         return null;
       }
 
@@ -155,7 +157,7 @@ export function useErpCache() {
       console.error(`[Cache] Error loading month ${year}-${month}:`, error);
       return null;
     }
-  }, [user]);
+  }, [user, isAdmin]);
 
   // Save a single month to Supabase cache using upsert (only admins can write)
   const saveMonthToCache = useCallback(async (year: number, month: number, data: RawSaleRow[]): Promise<boolean> => {
@@ -210,7 +212,14 @@ export function useErpCache() {
   }, [loadMonthFromCache]);
 
   // Check if a month needs refresh (is within last 3 months and expired or not cached)
+  // Non-admin users never need refresh - they always use cached data
   const monthNeedsRefresh = useCallback(async (year: number, month: number): Promise<boolean> => {
+    // Non-admin users never need to refresh - they use whatever is cached
+    if (!isAdmin) {
+      const cached = await isMonthCached(year, month);
+      return !cached; // Only return true if not cached at all (to trigger fetch attempt that will use stale data)
+    }
+    
     // If not within refresh range, never needs refresh (use cache forever)
     if (!isMonthWithinRefreshRange(year, month)) {
       const cached = await isMonthCached(year, month);
@@ -224,7 +233,7 @@ export function useErpCache() {
     const now = Date.now();
     const maxAge = MAX_CACHE_AGE_HOURS * 60 * 60 * 1000;
     return now - entry.timestamp > maxAge;
-  }, [isMonthCached, loadMonthFromCache]);
+  }, [isMonthCached, loadMonthFromCache, isAdmin]);
 
   // Get cached data for a specific month
   const getMonthData = useCallback(async (year: number, month: number): Promise<RawSaleRow[] | null> => {

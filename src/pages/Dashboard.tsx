@@ -28,16 +28,20 @@ export default function Dashboard() {
   const { rawData, isLoading, isConnected, getKpis, getColaboradores, getProdutos, fetchExcellencePercentage, fetchLeadsTotal, loadErpData, cancelLoading, erpCredentials, refreshErpCredentials, loadingProgress, isAdmin: isAdminFromContext } = useSheetData();
   const { isAdmin } = useUserRole();
   
+  // Default to last complete month
+  const lastMonthStart = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
+  const lastMonthEnd = new Date(new Date().getFullYear(), new Date().getMonth(), 0);
+  
   const [filters, setFilters] = useState<Filters>({
-    dateFrom: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-    dateTo: new Date(),
+    dateFrom: lastMonthStart,
+    dateTo: lastMonthEnd,
     filial: 'todas',
     filiais: ['todas'],
     colaborador: 'todos',
     colaboradores: ['todos'],
     compareEnabled: false,
-    compareDateFrom: new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1),
-    compareDateTo: new Date(new Date().getFullYear(), new Date().getMonth(), 0),
+    compareDateFrom: new Date(new Date().getFullYear(), new Date().getMonth() - 2, 1),
+    compareDateTo: new Date(new Date().getFullYear(), new Date().getMonth() - 1, 0),
   });
 
   const [kpis, setKpis] = useState<KpiData[]>([]);
@@ -111,12 +115,12 @@ export default function Dashboard() {
     fetchKpis();
   }, [filters.filial, filters.dateFrom, filters.dateTo, getKpis, fetchExcellencePercentage, fetchLeadsTotal]);
 
-  // Reload data when date filters change
+  // Reload data when date filters change (don't depend on isConnected to allow non-admin to load cache)
   useEffect(() => {
-    if (isConnected && filters.dateFrom && filters.dateTo) {
+    if (filters.dateFrom && filters.dateTo && erpCredentials?.hasPassword) {
       loadErpData(filters.dateFrom, filters.dateTo);
     }
-  }, [filters.dateFrom, filters.dateTo]);
+  }, [filters.dateFrom, filters.dateTo, erpCredentials?.hasPassword, loadErpData]);
 
   const colaboradores = useMemo(
     () => getColaboradores(filters.filial, filters.colaborador),
@@ -171,6 +175,24 @@ export default function Dashboard() {
 
         {/* Loading Progress Indicator */}
         <LoadingProgress progress={loadingProgress} onCancel={cancelLoading} />
+
+        {/* Label de dados visualizados */}
+        {hasData && (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground bg-muted/30 px-3 py-2 rounded-lg">
+            <span className="font-medium">Visualizando:</span>
+            <span>
+              {filters.dateFrom?.toLocaleDateString('pt-BR')} a {filters.dateTo?.toLocaleDateString('pt-BR')}
+            </span>
+            {filters.filial !== 'todas' && (
+              <>
+                <span className="text-muted-foreground/50">|</span>
+                <span>Filial: {filters.filial}</span>
+              </>
+            )}
+            <span className="text-muted-foreground/50">|</span>
+            <span>{rawData.length.toLocaleString('pt-BR')} registros</span>
+          </div>
+        )}
 
         {/* KPI Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
