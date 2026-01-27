@@ -1,4 +1,4 @@
-import { Trash2, Database, Clock, HardDrive, Calendar, RefreshCw } from 'lucide-react';
+import { Trash2, Database, Clock, HardDrive, Calendar, RefreshCw, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Popover,
@@ -11,12 +11,12 @@ import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 
 export function CacheInfoButton() {
-  const { cacheMeta, clearCache } = useSheetData();
+  const { cacheMeta, clearCache, localCacheStats } = useSheetData();
   const { isAdmin, isLoading } = useUserRole();
 
   const handleClearCache = async () => {
     await clearCache();
-    toast.success('Cache limpo com sucesso (Supabase)');
+    toast.success('Cache limpo com sucesso');
   };
 
   const formatDate = (date: Date | null) => {
@@ -47,6 +47,7 @@ export function CacheInfoButton() {
   };
 
   const monthsCached = (cacheMeta as { monthsCached?: string[] }).monthsCached || [];
+  const hasLocalCache = localCacheStats?.isAvailable && (localCacheStats?.totalMonths || 0) > 0;
 
   return (
     <Popover>
@@ -56,7 +57,11 @@ export function CacheInfoButton() {
           size="sm" 
           className="gap-2"
         >
-          <Database className="h-4 w-4" />
+          {hasLocalCache ? (
+            <Zap className="h-4 w-4 text-yellow-500" />
+          ) : (
+            <Database className="h-4 w-4" />
+          )}
           <span className="hidden sm:inline">Cache</span>
           {cacheMeta.totalEntries > 0 && (
             <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary/20 text-primary rounded-full">
@@ -68,8 +73,8 @@ export function CacheInfoButton() {
       <PopoverContent className="w-80" align="end">
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h4 className="font-semibold text-sm">Cache Supabase (por mês)</h4>
-            {!isLoading && isAdmin && cacheMeta.totalEntries > 0 && (
+            <h4 className="font-semibold text-sm">Cache de Dados</h4>
+            {!isLoading && (isAdmin || hasLocalCache) && (cacheMeta.totalEntries > 0 || hasLocalCache) && (
               <Button 
                 variant="destructive" 
                 size="sm" 
@@ -82,10 +87,35 @@ export function CacheInfoButton() {
             )}
           </div>
           
+          {/* Local Cache Section */}
+          {localCacheStats?.isAvailable && (
+            <div className="space-y-2 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+              <div className="flex items-center gap-2 text-sm font-medium text-yellow-600 dark:text-yellow-400">
+                <Zap className="h-4 w-4" />
+                <span>Cache Local (Instantâneo)</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                <div>
+                  <span>Meses: </span>
+                  <span className="font-medium text-foreground">{localCacheStats.totalMonths || 0}</span>
+                </div>
+                <div>
+                  <span>Registros: </span>
+                  <span className="font-medium text-foreground">{(localCacheStats.totalRecords || 0).toLocaleString('pt-BR')}</span>
+                </div>
+                <div className="col-span-2">
+                  <span>Tamanho: </span>
+                  <span className="font-medium text-foreground">{(localCacheStats.totalSizeEstimateMB || 0).toFixed(2)} MB</span>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Supabase Cache Section */}
           <div className="space-y-3 text-sm">
             <div className="flex items-center gap-2 text-muted-foreground">
-              <Calendar className="h-4 w-4" />
-              <span>Meses em cache:</span>
+              <Database className="h-4 w-4" />
+              <span>Cache Supabase (por mês):</span>
               <span className="ml-auto font-medium text-foreground">
                 {cacheMeta.totalEntries}
               </span>
@@ -113,6 +143,7 @@ export function CacheInfoButton() {
           {monthsCached.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Calendar className="h-3 w-3" />
                 <span>Meses armazenados:</span>
               </div>
               <div className="flex flex-wrap gap-1">
@@ -136,17 +167,18 @@ export function CacheInfoButton() {
             </div>
           )}
           
-          {cacheMeta.totalEntries === 0 && (
+          {cacheMeta.totalEntries === 0 && !hasLocalCache && (
             <p className="text-xs text-muted-foreground text-center py-2">
-              Nenhum dado em cache. Os dados serão armazenados no Supabase automaticamente por mês após a primeira busca.
+              Nenhum dado em cache. Os dados serão armazenados automaticamente após a primeira busca.
             </p>
           )}
           
           <div className="text-xs text-muted-foreground border-t pt-3 space-y-1">
-            <p><strong>Regras de atualização:</strong></p>
+            <p><strong>Como funciona:</strong></p>
             <ul className="list-disc list-inside space-y-0.5 pl-1">
+              <li><Zap className="h-3 w-3 inline text-yellow-500" /> Local: carregamento instantâneo</li>
+              <li><Database className="h-3 w-3 inline" /> Supabase: sincronização entre dispositivos</li>
               <li>Últimos 3 meses: atualizam a cada 24h</li>
-              <li>Meses anteriores: usam cache permanente</li>
             </ul>
           </div>
         </div>

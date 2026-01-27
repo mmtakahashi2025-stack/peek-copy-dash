@@ -4,6 +4,15 @@ import { RawSaleRow } from '@/contexts/SheetDataContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserRole } from '@/hooks/useUserRole';
 import { useChartAggregates } from '@/hooks/useChartAggregates';
+import {
+  getLocalMonthData,
+  setLocalMonthData,
+  getMultipleLocalMonths,
+  clearAllLocalCache as clearLocalIndexedDB,
+  getLocalCacheStats,
+  isIndexedDBAvailable,
+  calculateChecksum,
+} from '@/lib/indexeddb';
 
 // Cache configuration
 const MAX_CACHE_AGE_HOURS = 24;
@@ -23,6 +32,13 @@ interface CacheMeta {
   oldestEntry: Date | null;
   newestEntry: Date | null;
   monthsCached: string[];
+}
+
+interface LocalCacheStats {
+  totalRecords: number;
+  totalMonths: number;
+  totalSizeEstimateMB: number;
+  isAvailable: boolean;
 }
 
 // Check if a month is within the last N months to refresh
@@ -48,7 +64,38 @@ export function useErpCache() {
     newestEntry: null,
     monthsCached: [],
   });
+  const [localCacheStats, setLocalCacheStats] = useState<LocalCacheStats>({
+    totalRecords: 0,
+    totalMonths: 0,
+    totalSizeEstimateMB: 0,
+    isAvailable: false,
+  });
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Track pending background syncs
+  const pendingSyncs = useRef<Set<string>>(new Set());
+
+  // Initialize local cache stats
+  useEffect(() => {
+    const initLocalCache = async () => {
+      if (!isIndexedDBAvailable()) {
+        console.warn('[Cache] IndexedDB not available - using Supabase only');
+        return;
+      }
+      
+      const stats = await getLocalCacheStats();
+      setLocalCacheStats({
+        totalRecords: stats.totalRecords,
+        totalMonths: stats.totalMonths,
+        totalSizeEstimateMB: stats.totalSizeEstimateMB,
+        isAvailable: true,
+      });
+      
+      console.log(`[Cache] Local IndexedDB ready: ${stats.totalMonths} months, ${stats.totalRecords} records`);
+    };
+    
+    initLocalCache();
+  }, []);
 
   // Load cache metadata from Supabase (global cache - no user_id filter)
   const updateCacheMeta = useCallback(async () => {
@@ -254,16 +301,71 @@ export function useErpCache() {
     return now - entry.timestamp > maxAge;
   }, [isMonthCached, loadMonthFromCache, isAdmin]);
 
-  // Get cached data for a specific month
+  // Get cached data for a specific month - LOCAL FIRST, then Supabase
   const getMonthData = useCallback(async (year: number, month: number): Promise<RawSaleRow[] | null> => {
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    
+    // LAYER 1: Try local IndexedDB first (instant - 0ms)
+    if (isIndexedDBAvailable()) {
+      try {
+        const localEntry = await getLocalMonthData(year, month);
+        if (localEntry) {
+          console.log(`[Cache] ⚡ INSTANT from IndexedDB: ${key} (${localEntry.recordCount} records)`);
+          
+          // Background sync: check if Supabase has newer data
+          if (!pendingSyncs.current.has(key)) {
+            pendingSyncs.current.add(key);
+            
+            // Non-blocking background check
+            (async () => {
+              try {
+                const { data } = await supabase
+                  .from('erp_cache')
+                  .select('record_count, updated_at')
+                  .eq('year', year)
+                  .eq('month', month)
+                  .limit(1)
+                  .maybeSingle();
+                
+                if (data) {
+                  const supabaseTimestamp = new Date(data.updated_at).getTime();
+                  // If Supabase is newer, sync in background
+                  if (supabaseTimestamp > localEntry.timestamp) {
+                    console.log(`[Cache] 🔄 Background sync needed for ${key}: Supabase is ${Math.round((supabaseTimestamp - localEntry.timestamp) / 60000)}min newer`);
+                    // Could trigger a refresh here, but for now just log
+                  }
+                }
+              } finally {
+                pendingSyncs.current.delete(key);
+              }
+            })();
+          }
+          
+          return localEntry.data as RawSaleRow[];
+        }
+      } catch (err) {
+        console.warn(`[Cache] IndexedDB error for ${key}, falling back to Supabase:`, err);
+      }
+    }
+    
+    // LAYER 2: Fallback to Supabase (network request)
     const entry = await loadMonthFromCache(year, month);
     if (!entry) {
       console.log(`[Cache] getMonthData(${year}-${month}): No data found (user: ${user ? 'yes' : 'no'})`);
+      return null;
     }
-    return entry?.data || null;
+    
+    // Save to local cache for next time (instant access)
+    if (isIndexedDBAvailable()) {
+      setLocalMonthData(year, month, entry.data).catch(err => {
+        console.warn(`[Cache] Failed to save to IndexedDB:`, err);
+      });
+    }
+    
+    return entry.data;
   }, [loadMonthFromCache, user]);
 
-  // Batch load multiple months in a single query (more efficient)
+  // Batch load multiple months - LOCAL FIRST, then Supabase
   const getMultipleMonthsData = useCallback(async (
     months: { year: number; month: number }[]
   ): Promise<Map<string, RawSaleRow[]>> => {
@@ -276,42 +378,102 @@ export function useErpCache() {
     if (!currentUser) return new Map();
     
     const result = new Map<string, RawSaleRow[]>();
+    const missingMonths: { year: number; month: number }[] = [];
     
-    try {
-      // Build OR conditions for all requested months
-      const orConditions = months.map(m => `and(year.eq.${m.year},month.eq.${m.month})`).join(',');
-      
-      const { data, error } = await supabase
-        .from('erp_cache')
-        .select('year, month, data, record_count')
-        .or(orConditions);
-      
-      if (error || !data) {
-        console.error('[Cache] Error loading multiple months:', error);
-        return result;
-      }
-      
-      for (const row of data) {
-        const key = `${row.year}-${row.month}`;
-        const rawData = row.data as unknown;
-        if (Array.isArray(rawData)) {
-          result.set(key, rawData as RawSaleRow[]);
-          console.log(`[Cache] Batch loaded ${key}: ${row.record_count} records`);
+    // LAYER 1: Try local IndexedDB first (instant - 0ms)
+    if (isIndexedDBAvailable()) {
+      try {
+        const localEntries = await getMultipleLocalMonths(months);
+        
+        for (const { year, month } of months) {
+          const key = `${year}-${String(month).padStart(2, '0')}`;
+          const localEntry = localEntries.get(key);
+          
+          if (localEntry) {
+            result.set(`${year}-${month}`, localEntry.data as RawSaleRow[]);
+          } else {
+            missingMonths.push({ year, month });
+          }
         }
+        
+        if (result.size > 0) {
+          console.log(`[Cache] ⚡ INSTANT from IndexedDB: ${result.size}/${months.length} months`);
+        }
+        
+        // If we have all months locally, return immediately
+        if (missingMonths.length === 0) {
+          return result;
+        }
+      } catch (err) {
+        console.warn('[Cache] IndexedDB batch error, falling back to Supabase:', err);
+        missingMonths.push(...months);
       }
-      
-      console.log(`[Cache] Batch loaded ${result.size}/${months.length} months`);
-    } catch (error) {
-      console.error('[Cache] Error in batch load:', error);
+    } else {
+      missingMonths.push(...months);
+    }
+    
+    // LAYER 2: Fetch missing months from Supabase
+    if (missingMonths.length > 0) {
+      try {
+        // Build OR conditions for all requested months
+        const orConditions = missingMonths.map(m => `and(year.eq.${m.year},month.eq.${m.month})`).join(',');
+        
+        const { data, error } = await supabase
+          .from('erp_cache')
+          .select('year, month, data, record_count')
+          .or(orConditions);
+        
+        if (error || !data) {
+          console.error('[Cache] Error loading multiple months from Supabase:', error);
+          return result;
+        }
+        
+        for (const row of data) {
+          const key = `${row.year}-${row.month}`;
+          const rawData = row.data as unknown;
+          if (Array.isArray(rawData)) {
+            result.set(key, rawData as RawSaleRow[]);
+            console.log(`[Cache] Batch loaded from Supabase ${key}: ${row.record_count} records`);
+            
+            // Save to local cache for next time
+            if (isIndexedDBAvailable()) {
+              setLocalMonthData(row.year, row.month, rawData as RawSaleRow[]).catch(err => {
+                console.warn(`[Cache] Failed to save ${key} to IndexedDB:`, err);
+              });
+            }
+          }
+        }
+        
+        console.log(`[Cache] Batch loaded ${result.size}/${months.length} months (${missingMonths.length} from Supabase)`);
+      } catch (error) {
+        console.error('[Cache] Error in batch load:', error);
+      }
     }
     
     return result;
   }, [user]);
 
-  // Save data for a specific month (also calculates and saves aggregates)
+  // Save data for a specific month (saves to both local and Supabase)
   const setMonthData = useCallback(async (year: number, month: number, data: RawSaleRow[]): Promise<boolean> => {
+    // Save to Supabase first
     const success = await saveMonthToCache(year, month, data);
     if (success) {
+      // Also save to local IndexedDB for instant access next time
+      if (isIndexedDBAvailable()) {
+        setLocalMonthData(year, month, data).catch(err => {
+          console.warn(`[Cache] Failed to save ${year}-${month} to IndexedDB:`, err);
+        });
+        
+        // Update local stats
+        const stats = await getLocalCacheStats();
+        setLocalCacheStats({
+          totalRecords: stats.totalRecords,
+          totalMonths: stats.totalMonths,
+          totalSizeEstimateMB: stats.totalSizeEstimateMB,
+          isAvailable: true,
+        });
+      }
+      
       // Also calculate and save aggregates for fast chart loading
       await calculateAndSaveAggregates(year, month, data);
       await updateCacheMeta();
@@ -542,39 +704,48 @@ export function useErpCache() {
     return cachedMonths;
   }, [monthNeedsRefresh, getMonthData]);
 
-  // Clear all cache (only admins can clear)
+  // Clear all cache (only admins can clear Supabase, anyone can clear local)
   const clearAllCache = useCallback(async () => {
     if (!user) return;
-    
-    // Only admins can clear cache
-    if (!isAdmin) {
-      console.log('[Cache] Non-admin user cannot clear cache');
-      return;
-    }
     
     setIsLoading(true);
     
     try {
-      const { error: cacheError } = await supabase
-        .from('erp_cache')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all rows
-        
-      if (cacheError) {
-        console.error('[Cache] Error clearing cache:', cacheError);
+      // Always clear local IndexedDB cache
+      if (isIndexedDBAvailable()) {
+        await clearLocalIndexedDB();
+        setLocalCacheStats({
+          totalRecords: 0,
+          totalMonths: 0,
+          totalSizeEstimateMB: 0,
+          isAvailable: true,
+        });
+        console.log('[Cache] Local IndexedDB cache cleared');
       }
       
-      const { error: consolidatedError } = await supabase
-        .from('erp_consolidated_cache')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all rows
+      // Only admins can clear Supabase cache
+      if (isAdmin) {
+        const { error: cacheError } = await supabase
+          .from('erp_cache')
+          .delete()
+          .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all rows
+          
+        if (cacheError) {
+          console.error('[Cache] Error clearing Supabase cache:', cacheError);
+        }
         
-      if (consolidatedError) {
-        console.error('[Cache] Error clearing consolidated cache:', consolidatedError);
+        const { error: consolidatedError } = await supabase
+          .from('erp_consolidated_cache')
+          .delete()
+          .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all rows
+          
+        if (consolidatedError) {
+          console.error('[Cache] Error clearing consolidated cache:', consolidatedError);
+        }
+        
+        await updateCacheMeta();
+        console.log('[Cache] All Supabase cache cleared');
       }
-      
-      await updateCacheMeta();
-      console.log('[Cache] All Supabase cache cleared');
     } finally {
       setIsLoading(false);
     }
@@ -632,6 +803,8 @@ export function useErpCache() {
     getMonthsToRefresh,
     getCachedMonths,
     isMonthWithinRefreshRange,
+    // Local cache stats
+    localCacheStats,
     // Admin status
     isAdmin,
     // Constants
