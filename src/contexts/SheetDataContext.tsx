@@ -133,6 +133,8 @@ export interface LoadingProgressState {
 
 interface SheetDataContextType {
   rawData: RawSaleRow[];
+  yearlyRawData: RawSaleRow[];
+  isLoadingYearly: boolean;
   isLoading: boolean;
   error: string | null;
   isConnected: boolean;
@@ -148,6 +150,7 @@ interface SheetDataContextType {
   getEvolucao: () => EvolucaoData[];
   getProdutos: (filialId: string) => ProdutoData[];
   loadErpData: (dateFrom?: Date, dateTo?: Date, forceRefresh?: boolean) => Promise<void>;
+  loadYearlyData: (years: number[]) => Promise<void>;
   cancelLoading: () => void;
   refreshData: () => Promise<void>;
   testErpLogin: () => Promise<LoginTestResult>;
@@ -194,6 +197,8 @@ function formatDateForErp(date: Date): string {
 
 export function SheetDataProvider({ children }: { children: ReactNode }) {
   const [rawData, setRawData] = useState<RawSaleRow[]>([]);
+  const [yearlyRawData, setYearlyRawData] = useState<RawSaleRow[]>([]);
+  const [isLoadingYearly, setIsLoadingYearly] = useState(false);
   const [kpiTargets, setKpiTargets] = useState<KpiTarget[]>([]);
   const [excellencePercentage, setExcellencePercentage] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -237,9 +242,36 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     getMonthsToRefresh,
     getCachedMonths,
     setMonthData,
+    getMonthData,
     monthsToRefresh: MONTHS_TO_REFRESH_CONFIG,
     isAdmin: isAdminFromCache,
   } = useErpCache();
+
+  // Load yearly data for the evolution chart (independent of dashboard filters)
+  const loadYearlyData = useCallback(async (years: number[]) => {
+    if (years.length === 0) return;
+    
+    setIsLoadingYearly(true);
+    const allData: RawSaleRow[] = [];
+    
+    try {
+      for (const year of years) {
+        for (let month = 1; month <= 12; month++) {
+          const monthData = await getMonthData(year, month);
+          if (monthData) {
+            allData.push(...monthData);
+          }
+        }
+      }
+      
+      setYearlyRawData(allData);
+      console.log(`[YearlyData] Loaded ${allData.length} records for years: ${years.join(', ')}`);
+    } catch (error) {
+      console.error('[YearlyData] Error loading yearly data:', error);
+    } finally {
+      setIsLoadingYearly(false);
+    }
+  }, [getMonthData]);
 
   // Fetch system-wide ERP credentials (configured by admin)
   const refreshErpCredentials = useCallback(async () => {
@@ -1083,6 +1115,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   return (
     <SheetDataContext.Provider value={{
       rawData,
+      yearlyRawData,
+      isLoadingYearly,
       isLoading,
       error,
       isConnected,
@@ -1098,6 +1132,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       getEvolucao,
       getProdutos,
       loadErpData,
+      loadYearlyData,
       cancelLoading,
       refreshData,
       testErpLogin,
