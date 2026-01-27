@@ -1,9 +1,10 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { XAxis, YAxis, CartesianGrid, BarChart, Bar } from 'recharts';
-import { useSheetData, RawSaleRow } from '@/contexts/SheetDataContext';
+import { RawSaleRow } from '@/contexts/SheetDataContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChartAggregates, MonthlyAggregate } from '@/hooks/useChartAggregates';
+import { useDailyAggregates, DailyAggregate } from '@/hooks/useDailyAggregates';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
@@ -170,6 +171,7 @@ export function SalesEvolutionChart({
 }: SalesEvolutionChartProps) {
   const { user, loading: authLoading } = useAuth();
   const { fetchAggregates, getYearlyChartData, isLoading: isLoadingAggregates } = useChartAggregates();
+  const { fetchDailyAggregates, getMonthlyChartData, getWeeklyChartData, isLoading: isLoadingDailyAggregates } = useDailyAggregates();
   
   // State
   const [activeTab, setActiveTab] = useState<'anual' | 'semana' | 'mensal'>('anual');
@@ -193,7 +195,7 @@ export function SalesEvolutionChart({
   // Data states
   const [yearlyAggregates, setYearlyAggregates] = useState<MonthlyAggregate[]>([]);
   const [dailyData, setDailyData] = useState<{ dia: string; faturamento: number }[]>([]);
-  const [weeklyData, setWeeklyData] = useState<{ dia: string; diaSemana: string; faturamento: number }[]>([]);
+  const [weeklyData, setWeeklyData] = useState<{ dia: string; diaSemana?: string; faturamento: number }[]>([]);
   const [isLoadingDaily, setIsLoadingDaily] = useState(false);
   const [isLoadingWeekly, setIsLoadingWeekly] = useState(false);
   
@@ -253,13 +255,30 @@ export function SalesEvolutionChart({
       .then(data => setYearlyAggregates(data));
   }, [selectedYearForAnnual, previousYear, filialId, colaboradorId, user, authLoading, fetchAggregates]);
 
-  // Load daily data ONLY when monthly tab is active (lazy loading)
+  // Load daily data using pre-calculated aggregates (FAST: ~31 rows instead of ~20k)
   const loadDailyData = useCallback(async () => {
     if (!user) return;
     
     setIsLoadingDaily(true);
     try {
-      // Fetch only the specific month from cache
+      // Try to use pre-calculated daily aggregates first
+      const aggregates = await fetchDailyAggregates(
+        selectedYear,
+        selectedMonth + 1,
+        filialId,
+        colaboradorId !== 'todos' ? colaboradorId : undefined
+      );
+
+      if (aggregates.length > 0) {
+        // Use pre-calculated aggregates (ultra-fast)
+        const chartData = getMonthlyChartData(aggregates, selectedYear, selectedMonth + 1);
+        setDailyData(chartData);
+        console.log(`[SalesEvolution] Daily data from aggregates: ${aggregates.length} rows for ${selectedYear}-${selectedMonth + 1}`);
+        return;
+      }
+
+      // Fallback to raw cache data if no aggregates exist
+      console.log(`[SalesEvolution] No daily aggregates, falling back to raw cache for ${selectedYear}-${selectedMonth + 1}`);
       const { data, error } = await supabase
         .from('erp_cache')
         .select('data')
@@ -269,7 +288,6 @@ export function SalesEvolutionChart({
         .maybeSingle();
 
       if (error || !data) {
-        console.log(`[SalesEvolution] No data for ${selectedYear}-${selectedMonth + 1}`);
         setDailyData([]);
         return;
       }
@@ -280,7 +298,7 @@ export function SalesEvolutionChart({
         return;
       }
 
-      // Filter and calculate daily totals
+      // Filter and calculate daily totals (slow path)
       let filtered = rawData;
       
       if (filialId !== 'todas') {
@@ -311,16 +329,16 @@ export function SalesEvolutionChart({
         faturamento: Math.round(dailyFaturamento[i + 1] || 0),
       })));
       
-      console.log(`[SalesEvolution] Daily data loaded: ${filtered.length} records for ${selectedYear}-${selectedMonth + 1}`);
+      console.log(`[SalesEvolution] Daily data from raw cache: ${filtered.length} records`);
     } catch (error) {
       console.error('[SalesEvolution] Error loading daily data:', error);
       setDailyData([]);
     } finally {
       setIsLoadingDaily(false);
     }
-  }, [user, selectedYear, selectedMonth, filialId, colaboradorId]);
+  }, [user, selectedYear, selectedMonth, filialId, colaboradorId, fetchDailyAggregates, getMonthlyChartData]);
 
-  // Load weekly data ONLY when semana tab is active
+  // Load weekly data using pre-calculated aggregates (FAST: ~31 rows instead of ~20k)
   const loadWeeklyData = useCallback(async () => {
     if (!user) return;
     
@@ -329,6 +347,30 @@ export function SalesEvolutionChart({
     
     setIsLoadingWeekly(true);
     try {
+      // Try to use pre-calculated daily aggregates first
+      const aggregates = await fetchDailyAggregates(
+        selectedYearForWeek,
+        selectedMonthForWeek + 1,
+        filialId,
+        colaboradorId !== 'todos' ? colaboradorId : undefined
+      );
+
+      if (aggregates.length > 0) {
+        // Use pre-calculated aggregates (ultra-fast)
+        const chartData = getWeeklyChartData(
+          aggregates,
+          selectedYearForWeek,
+          selectedMonthForWeek + 1,
+          currentWeekInfo.startDay,
+          currentWeekInfo.endDay
+        );
+        setWeeklyData(chartData);
+        console.log(`[SalesEvolution] Weekly data from aggregates: ${aggregates.length} rows`);
+        return;
+      }
+
+      // Fallback to raw cache data if no aggregates exist
+      console.log(`[SalesEvolution] No daily aggregates, falling back to raw cache for week ${selectedWeek}`);
       const { data, error } = await supabase
         .from('erp_cache')
         .select('data')
@@ -338,7 +380,6 @@ export function SalesEvolutionChart({
         .maybeSingle();
 
       if (error || !data) {
-        console.log(`[SalesEvolution] No data for ${selectedYearForWeek}-${selectedMonthForWeek + 1}`);
         setWeeklyData([]);
         return;
       }
@@ -349,7 +390,7 @@ export function SalesEvolutionChart({
         return;
       }
 
-      // Filter by filial and colaborador
+      // Filter by filial and colaborador (slow path)
       let filtered = rawData;
       
       if (filialId !== 'todas') {
@@ -390,14 +431,14 @@ export function SalesEvolutionChart({
       }
 
       setWeeklyData(weekData);
-      console.log(`[SalesEvolution] Weekly data loaded: ${weekData.length} days`);
+      console.log(`[SalesEvolution] Weekly data from raw cache: ${weekData.length} days`);
     } catch (error) {
       console.error('[SalesEvolution] Error loading weekly data:', error);
       setWeeklyData([]);
     } finally {
       setIsLoadingWeekly(false);
     }
-  }, [user, selectedYearForWeek, selectedMonthForWeek, selectedWeek, weeksInMonth, filialId, colaboradorId]);
+  }, [user, selectedYearForWeek, selectedMonthForWeek, selectedWeek, weeksInMonth, filialId, colaboradorId, fetchDailyAggregates, getWeeklyChartData]);
 
   // Lazy load daily data when tab changes to "mensal"
   useEffect(() => {
