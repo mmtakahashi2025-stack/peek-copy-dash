@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.reload-erp-cache]
 verify_jwt = false
+
+[functions.recalculate-aggregates]
+verify_jwt = false

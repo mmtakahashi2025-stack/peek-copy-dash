@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { RawSaleRow } from '@/contexts/SheetDataContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserRole } from '@/hooks/useUserRole';
-import { useChartAggregates } from '@/hooks/useChartAggregates';
+import { useAggregateCalculator } from '@/hooks/useAggregateCalculator';
 import {
   getLocalMonthData,
   setLocalMonthData,
@@ -60,7 +60,7 @@ function isMonthWithinRefreshRange(year: number, month: number, monthsToRefresh:
 export function useErpCache() {
   const { user } = useAuth();
   const { isAdmin } = useUserRole();
-  const { calculateAndSaveAggregates } = useChartAggregates();
+  const { calculateAllAggregates } = useAggregateCalculator();
   const [cacheMeta, setCacheMeta] = useState<CacheMeta>({
     totalEntries: 0,
     totalSizeMB: 0,
@@ -482,12 +482,12 @@ export function useErpCache() {
         });
       }
       
-      // Also calculate and save aggregates for fast chart loading
-      await calculateAndSaveAggregates(year, month, data);
+      // Also calculate and save ALL aggregates (monthly, daily, rankings) for fast loading
+      await calculateAllAggregates(year, month, data);
       await updateCacheMeta();
     }
     return success;
-  }, [saveMonthToCache, updateCacheMeta, calculateAndSaveAggregates]);
+  }, [saveMonthToCache, updateCacheMeta, calculateAllAggregates]);
   
   // Update local cache retention preference and prune if needed
   const updateLocalRetention = useCallback(async (months: number): Promise<void> => {

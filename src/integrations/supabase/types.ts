@@ -86,6 +86,39 @@ export type Database = {
         }
         Relationships: []
       }
+      erp_daily_aggregates: {
+        Row: {
+          colaborador: string | null
+          created_at: string
+          date: string
+          faturamento: number
+          filial: string
+          id: string
+          quantidade_vendas: number
+          updated_at: string
+        }
+        Insert: {
+          colaborador?: string | null
+          created_at?: string
+          date: string
+          faturamento?: number
+          filial?: string
+          id?: string
+          quantidade_vendas?: number
+          updated_at?: string
+        }
+        Update: {
+          colaborador?: string | null
+          created_at?: string
+          date?: string
+          faturamento?: number
+          filial?: string
+          id?: string
+          quantidade_vendas?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       erp_monthly_aggregates: {
         Row: {
           colaborador: string | null
@@ -117,6 +150,39 @@ export type Database = {
           id?: string
           month?: number
           quantidade_vendas?: number
+          updated_at?: string
+          year?: number
+        }
+        Relationships: []
+      }
+      erp_ranking_cache: {
+        Row: {
+          created_at: string
+          filial: string
+          id: string
+          month: number
+          ranking_data: Json
+          ranking_type: string
+          updated_at: string
+          year: number
+        }
+        Insert: {
+          created_at?: string
+          filial?: string
+          id?: string
+          month: number
+          ranking_data: Json
+          ranking_type: string
+          updated_at?: string
+          year: number
+        }
+        Update: {
+          created_at?: string
+          filial?: string
+          id?: string
+          month?: number
+          ranking_data?: Json
+          ranking_type?: string
           updated_at?: string
           year?: number
         }
