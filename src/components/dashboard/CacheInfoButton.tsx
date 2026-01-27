@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 
 export function CacheInfoButton() {
   const { cacheMeta, clearCache } = useSheetData();
-  const { isAdmin } = useUserRole();
+  const { isAdmin, isLoading } = useUserRole();
 
   const handleClearCache = async () => {
     await clearCache();
@@ -69,7 +69,7 @@ export function CacheInfoButton() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h4 className="font-semibold text-sm">Cache Supabase (por mês)</h4>
-            {isAdmin && cacheMeta.totalEntries > 0 && (
+            {!isLoading && isAdmin && cacheMeta.totalEntries > 0 && (
               <Button 
                 variant="destructive" 
                 size="sm" 
