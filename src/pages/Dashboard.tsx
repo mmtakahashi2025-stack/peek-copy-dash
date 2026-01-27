@@ -227,6 +227,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <SalesEvolutionChart 
             filialId={filters.filial}
+            colaboradorId={filters.colaborador}
             dateFrom={filters.dateFrom}
             dateTo={filters.dateTo}
             compareEnabled={filters.compareEnabled}
