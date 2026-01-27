@@ -1,52 +1,67 @@
 
+# Plano: Corrigir Tooltips (HoverCard) nos Rankings
 
-# Plano: Limpar Cache e Recarregar Dados ERP (Jan/2023 - Jan/2026)
+## Problema Identificado
 
-## Estado Atual do Banco
+Os HoverCards (tooltips) nos cards de Produtos e Vendedores nao estao aparecendo porque o componente `HoverCardContent` nao esta sendo renderizado atraves de um **Portal**.
 
-| Tabela | Registros | Periodo |
-|--------|-----------|---------|
-| erp_cache | 37 meses | Jan/2023 - Jan/2026 |
-| erp_monthly_aggregates | 0 | (vazia) |
-| erp_consolidated_cache | 1 | - |
+### Causa Raiz
 
-**Total de registros de vendas no cache:** 199.764
+O arquivo `src/components/ui/hover-card.tsx` exporta o `HoverCardContent` sem encapsula-lo em um `HoverCardPortal`. Isso causa:
 
----
-
-## Acoes a Executar
-
-### Passo 1: Limpar Todas as Tabelas de Cache
-
-Executar DELETE em:
-- `erp_cache` (dados brutos mensais)
-- `erp_monthly_aggregates` (agregados - ja vazia)
-- `erp_consolidated_cache` (metadados)
-
-### Passo 2: Recarregar Dados do ERP
-
-Chamar a edge function `fetch-erp-data` para cada mes do periodo:
-- **Inicio:** Janeiro 2023
-- **Fim:** Janeiro 2026
-- **Total:** 37 meses
-
-O sistema ira:
-1. Buscar dados mes a mes do ERP
-2. Salvar no `erp_cache`
-3. Calcular e salvar agregados em `erp_monthly_aggregates` (nova funcionalidade)
+1. O conteudo do hover ser renderizado dentro da hierarquia DOM do componente pai
+2. Se o pai tem `overflow: hidden` ou scroll, o tooltip fica cortado ou invisivel
+3. Problemas de z-index pois o elemento nao esta no topo do DOM
 
 ---
 
-## Tempo Estimado
+## Solucao
 
-- Limpeza: Instantaneo
-- Recarga: ~5-10 minutos (depende da velocidade do ERP, processamento sequencial)
+Modificar o componente `HoverCardContent` para usar o `HoverCardPortal` internamente:
+
+### Arquivo: `src/components/ui/hover-card.tsx`
+
+```text
+ANTES:
+const HoverCardContent = React.forwardRef<...>(
+  ({ className, align = "center", sideOffset = 4, ...props }, ref) => (
+    <HoverCardPrimitive.Content ... />
+  )
+);
+
+DEPOIS:
+const HoverCardContent = React.forwardRef<...>(
+  ({ className, align = "center", sideOffset = 4, ...props }, ref) => (
+    <HoverCardPrimitive.Portal>
+      <HoverCardPrimitive.Content ... />
+    </HoverCardPrimitive.Portal>
+  )
+);
+```
+
+---
+
+## Mudancas Necessarias
+
+| Arquivo | Acao |
+|---------|------|
+| `src/components/ui/hover-card.tsx` | Adicionar `HoverCardPrimitive.Portal` envolvendo o `Content` |
+
+---
+
+## Detalhes Tecnicos
+
+O `HoverCardPrimitive.Portal` renderiza o conteudo diretamente no `document.body`, garantindo:
+- Z-index funcional (elemento no topo do DOM)
+- Sem interferencia de `overflow: hidden` dos pais
+- Posicionamento correto mesmo em containers com scroll
+
+Esta e a mesma abordagem usada pelo shadcn/ui em versoes mais recentes e por outros componentes como `Dialog`, `Popover`, etc.
 
 ---
 
 ## Resultado Esperado
 
-- Cache limpo e recarregado com dados frescos
-- Tabela `erp_monthly_aggregates` populada automaticamente
-- Grafico de Evolucao de Vendas funcionando com dados agregados (muito mais rapido)
-
+Ao passar o mouse sobre um produto ou vendedor nos rankings, o tooltip aparecera mostrando:
+- **Produtos**: Top 3 vendedores daquele produto
+- **Vendedores**: Top 3 produtos vendidos por aquele colaborador
