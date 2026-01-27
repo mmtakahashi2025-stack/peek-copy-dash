@@ -602,6 +602,10 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
           });
 
           if (funcError) {
+            // Handle 401 Unauthorized - user needs to login
+            if (funcError.message?.includes('401') || funcError.message?.includes('Unauthorized')) {
+              throw new Error('Sessão expirada. Faça login novamente.');
+            }
             throw new Error(funcError.message);
           }
 
@@ -731,6 +735,10 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       });
 
       if (funcError) {
+        // Handle 401 Unauthorized - user needs to login
+        if (funcError.message?.includes('401') || funcError.message?.includes('Unauthorized')) {
+          throw new Error('Sessão expirada. Faça login novamente.');
+        }
         throw new Error(funcError.message || 'Erro ao buscar dados do ERP');
       }
 
