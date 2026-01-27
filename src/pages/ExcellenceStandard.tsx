@@ -59,6 +59,14 @@ const MONTHS = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
+// HTML escape function to prevent XSS in print content
+function escapeHtml(text: string | null | undefined): string {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 export default function ExcellenceStandard() {
   const { user, loading: authLoading } = useAuth();
   const { canEdit, isLoading: isRoleLoading } = useUserRole();
@@ -394,8 +402,8 @@ export default function ExcellenceStandard() {
       const scoreLabel = score === 1 ? 'SIM' : score === 0 ? 'NÃO' : score === -1 ? 'N/A' : '-';
       return `
         <tr>
-          <td style="border: 1px solid #ddd; padding: 8px;">${c.code}</td>
-          <td style="border: 1px solid #ddd; padding: 8px;">${c.description}</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${escapeHtml(c.code)}</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${escapeHtml(c.description)}</td>
           <td style="border: 1px solid #ddd; padding: 8px; text-align: center; font-weight: bold; color: ${score === 1 ? 'green' : score === 0 ? 'red' : '#666'};">
             ${scoreLabel}
           </td>
@@ -407,7 +415,7 @@ export default function ExcellenceStandard() {
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Avaliação - ${evaluation.collaborator_name}</title>
+        <title>Avaliação - ${escapeHtml(evaluation.collaborator_name)}</title>
         <style>
           body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
           .header { border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 20px; }
@@ -433,7 +441,7 @@ export default function ExcellenceStandard() {
         <div class="info-grid">
           <div class="info-item">
             <div class="info-label">Colaborador</div>
-            <div class="info-value">${evaluation.collaborator_name}</div>
+            <div class="info-value">${escapeHtml(evaluation.collaborator_name)}</div>
           </div>
           <div class="info-item">
             <div class="info-label">Data da Avaliação</div>
@@ -441,11 +449,11 @@ export default function ExcellenceStandard() {
           </div>
           <div class="info-item">
             <div class="info-label">Nº da Conversa</div>
-            <div class="info-value">${evaluation.conversation_number || '-'}</div>
+            <div class="info-value">${escapeHtml(evaluation.conversation_number) || '-'}</div>
           </div>
           <div class="info-item">
             <div class="info-label">Avaliador</div>
-            <div class="info-value">${evaluation.evaluator_email || '-'}</div>
+            <div class="info-value">${escapeHtml(evaluation.evaluator_email) || '-'}</div>
           </div>
         </div>
 
@@ -517,8 +525,8 @@ export default function ExcellenceStandard() {
           const scoreColor = score === 1 ? 'green' : score === 0 ? 'red' : '#666';
           return `
             <tr>
-              <td style="border: 1px solid #ddd; padding: 4px 8px; font-size: 11px;">${c.code}</td>
-              <td style="border: 1px solid #ddd; padding: 4px 8px; font-size: 11px;">${c.description}</td>
+              <td style="border: 1px solid #ddd; padding: 4px 8px; font-size: 11px;">${escapeHtml(c.code)}</td>
+              <td style="border: 1px solid #ddd; padding: 4px 8px; font-size: 11px;">${escapeHtml(c.description)}</td>
               <td style="border: 1px solid #ddd; padding: 4px 8px; text-align: center; font-weight: bold; color: ${scoreColor}; font-size: 11px;">
                 ${scoreLabel}
               </td>
@@ -531,7 +539,7 @@ export default function ExcellenceStandard() {
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
               <div>
                 <strong style="font-size: 14px;">Dia ${format(new Date(evaluation.evaluation_date), 'dd/MM/yyyy')}</strong>
-                <span style="color: #666; font-size: 12px; margin-left: 10px;">Conversa: ${evaluation.conversation_number || '-'}</span>
+                <span style="color: #666; font-size: 12px; margin-left: 10px;">Conversa: ${escapeHtml(evaluation.conversation_number) || '-'}</span>
               </div>
               <div style="background: ${pct >= 85 ? '#d4edda' : '#f8d7da'}; padding: 5px 15px; border-radius: 4px;">
                 <strong style="color: ${pct >= 85 ? '#155724' : '#721c24'}; font-size: 16px;">${pct.toFixed(0)}%</strong>
@@ -550,7 +558,7 @@ export default function ExcellenceStandard() {
               </tbody>
             </table>
             <div style="margin-top: 8px; font-size: 11px; color: #666;">
-              Avaliador: ${evaluation.evaluator_email || '-'}
+              Avaliador: ${escapeHtml(evaluation.evaluator_email) || '-'}
             </div>
           </div>
         `;
@@ -560,7 +568,7 @@ export default function ExcellenceStandard() {
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Grade Mensal - ${collaboratorName}</title>
+        <title>Grade Mensal - ${escapeHtml(collaboratorName)}</title>
         <style>
           body { font-family: Arial, sans-serif; padding: 20px; max-width: 900px; margin: 0 auto; }
           .header { border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 20px; }
@@ -586,7 +594,7 @@ export default function ExcellenceStandard() {
         <div class="info-section">
           <div class="info-row">
             <span class="info-label">Colaborador:</span>
-            <span class="info-value">${collaboratorName}</span>
+            <span class="info-value">${escapeHtml(collaboratorName)}</span>
           </div>
           <div class="info-row">
             <span class="info-label">Período:</span>
