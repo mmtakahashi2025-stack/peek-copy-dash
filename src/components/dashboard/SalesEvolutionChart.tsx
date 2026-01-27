@@ -2,9 +2,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { XAxis, YAxis, CartesianGrid, BarChart, Bar } from 'recharts';
 import { useSheetData, RawSaleRow } from '@/contexts/SheetDataContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface ChartConfig {
@@ -95,6 +96,7 @@ const parseRowDate = (dataVenda: number | string): Date | null => {
 export function SalesEvolutionChart({ 
   filialId = 'todas', 
 }: SalesEvolutionChartProps) {
+  const { user, loading: authLoading } = useAuth();
   const { rawData, yearlyRawData, isLoadingYearly, loadYearlyData } = useSheetData();
   
   // Local state for month/year selection
@@ -103,6 +105,9 @@ export function SalesEvolutionChart({
   
   // State for annual tab year selection
   const [selectedYearForAnnual, setSelectedYearForAnnual] = useState(new Date().getFullYear());
+  
+  // Track loaded years to avoid duplicate calls
+  const loadedYearsRef = useRef<string>('');
 
   // Generate year options dynamically
   const yearOptions = useMemo(() => {
@@ -110,11 +115,48 @@ export function SalesEvolutionChart({
     return Array.from({ length: 6 }, (_, i) => currentYear - 5 + i);
   }, []);
 
-  // Load yearly data when component mounts or selected year changes
+  // Load yearly data when user is authenticated and selected year changes
   useEffect(() => {
+    // Don't load if auth is still loading
+    if (authLoading) {
+      console.log('[SalesEvolution] Auth still loading, waiting...');
+      return;
+    }
+    
+    // Don't load if no user
+    if (!user) {
+      console.log('[SalesEvolution] No user, skipping load');
+      return;
+    }
+    
+    const yearsKey = `${selectedYearForAnnual}-${selectedYearForAnnual - 1}`;
+    
+    // Avoid reloading same years if we already have data
+    if (loadedYearsRef.current === yearsKey && yearlyRawData.length > 0) {
+      console.log('[SalesEvolution] Years already loaded:', yearsKey);
+      return;
+    }
+    
+    console.log('[SalesEvolution] Loading years:', yearsKey);
     const yearsToLoad = [selectedYearForAnnual, selectedYearForAnnual - 1];
     loadYearlyData(yearsToLoad);
-  }, [selectedYearForAnnual, loadYearlyData]);
+    loadedYearsRef.current = yearsKey;
+  }, [selectedYearForAnnual, loadYearlyData, user, authLoading, yearlyRawData.length]);
+  
+  // Retry logic: if data is still empty after auth is ready, retry once after a delay
+  useEffect(() => {
+    if (authLoading || !user) return;
+    if (yearlyRawData.length > 0 || isLoadingYearly) return;
+    
+    const timer = setTimeout(() => {
+      console.log('[SalesEvolution] Retry loading after timeout...');
+      loadedYearsRef.current = ''; // Reset to force reload
+      const yearsToLoad = [selectedYearForAnnual, selectedYearForAnnual - 1];
+      loadYearlyData(yearsToLoad);
+    }, 2000);
+    
+    return () => clearTimeout(timer);
+  }, [authLoading, user, yearlyRawData.length, isLoadingYearly, selectedYearForAnnual, loadYearlyData]);
 
   // Normalize filial ID for comparison
   const normalizeFilialId = (filial: string): string => {

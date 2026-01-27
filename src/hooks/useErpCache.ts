@@ -111,7 +111,17 @@ export function useErpCache() {
   // Load a single month from Supabase cache (global cache - no user_id filter)
   // For non-admin users, ignore expiration and return stale data
   const loadMonthFromCache = useCallback(async (year: number, month: number): Promise<MonthlyCacheEntry | null> => {
-    if (!user) return null;
+    // Fallback: fetch user directly if not available via hook (race condition fix)
+    let currentUser = user;
+    if (!currentUser) {
+      const { data } = await supabase.auth.getUser();
+      currentUser = data.user;
+    }
+    
+    if (!currentUser) {
+      console.log(`[Cache] loadMonthFromCache(${year}-${month}): User not available`);
+      return null;
+    }
 
     try {
       const { data, error } = await supabase
@@ -126,7 +136,10 @@ export function useErpCache() {
         return null;
       }
 
-      if (!data) return null;
+      if (!data) {
+        console.log(`[Cache] No cached data for ${year}-${month}`);
+        return null;
+      }
 
       const timestamp = new Date(data.updated_at).getTime();
       const now = Date.now();
@@ -146,6 +159,7 @@ export function useErpCache() {
         return null;
       }
 
+      console.log(`[Cache] Loaded ${year}-${month}: ${data.record_count} records`);
       return {
         data: rawData as RawSaleRow[],
         timestamp,
