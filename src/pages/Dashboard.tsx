@@ -228,17 +228,19 @@ export default function Dashboard() {
           compareDateTo={filters.compareDateTo}
         />
         
-        {/* Rankings Side by Side - Using pre-calculated cache */}
+        {/* Rankings Side by Side - Using pre-calculated cache + rawData for tooltips */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <RankingCard 
             year={filters.dateFrom?.getFullYear() ?? new Date().getFullYear()} 
             month={(filters.dateFrom?.getMonth() ?? new Date().getMonth() - 1) + 1} 
-            filialId={filters.filial} 
+            filialId={filters.filial}
+            rawData={rawData}
           />
           <ProductRankingCard 
             year={filters.dateFrom?.getFullYear() ?? new Date().getFullYear()} 
             month={(filters.dateFrom?.getMonth() ?? new Date().getMonth() - 1) + 1} 
-            filialId={filters.filial} 
+            filialId={filters.filial}
+            rawData={rawData}
           />
         </div>
       </main>

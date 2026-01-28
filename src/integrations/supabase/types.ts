@@ -95,6 +95,7 @@ export type Database = {
           filial: string
           id: string
           quantidade_vendas: number
+          total_lucro: number | null
           updated_at: string
         }
         Insert: {
@@ -105,6 +106,7 @@ export type Database = {
           filial?: string
           id?: string
           quantidade_vendas?: number
+          total_lucro?: number | null
           updated_at?: string
         }
         Update: {
@@ -115,6 +117,7 @@ export type Database = {
           filial?: string
           id?: string
           quantidade_vendas?: number
+          total_lucro?: number | null
           updated_at?: string
         }
         Relationships: []

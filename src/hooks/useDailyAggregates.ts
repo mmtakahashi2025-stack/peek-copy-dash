@@ -7,6 +7,7 @@ export interface DailyAggregate {
   filial: string;
   colaborador: string | null;
   faturamento: number;
+  lucro: number;
   quantidade_vendas: number;
 }
 
@@ -14,6 +15,7 @@ export interface DailyChartDataPoint {
   dia: string;
   diaSemana?: string;
   faturamento: number;
+  lucro: number;
 }
 
 const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -40,7 +42,7 @@ export function useDailyAggregates() {
       
       let query = supabase
         .from('erp_daily_aggregates')
-        .select('date, filial, colaborador, faturamento, quantidade_vendas')
+        .select('date, filial, colaborador, faturamento, total_lucro, quantidade_vendas')
         .gte('date', startDate)
         .lte('date', endDate)
         .order('date', { ascending: true });
@@ -71,6 +73,7 @@ export function useDailyAggregates() {
         filial: row.filial,
         colaborador: row.colaborador,
         faturamento: Number(row.faturamento),
+        lucro: Number((row as any).total_lucro || 0),
         quantidade_vendas: row.quantidade_vendas,
       }));
 
@@ -91,19 +94,25 @@ export function useDailyAggregates() {
     month: number
   ): DailyChartDataPoint[] => {
     const daysInMonth = new Date(year, month, 0).getDate();
-    const dailyMap = new Map<string, number>();
+    const dailyMap = new Map<string, { faturamento: number; lucro: number }>();
     
     aggregates.forEach(agg => {
       const dayStr = agg.date.split('-')[2]; // Get day part
-      dailyMap.set(dayStr, (dailyMap.get(dayStr) || 0) + agg.faturamento);
+      const existing = dailyMap.get(dayStr) || { faturamento: 0, lucro: 0 };
+      dailyMap.set(dayStr, {
+        faturamento: existing.faturamento + agg.faturamento,
+        lucro: existing.lucro + agg.lucro,
+      });
     });
     
     return Array.from({ length: daysInMonth }, (_, i) => {
       const dayNum = i + 1;
       const dayStr = String(dayNum).padStart(2, '0');
+      const values = dailyMap.get(dayStr) || { faturamento: 0, lucro: 0 };
       return {
         dia: dayStr,
-        faturamento: Math.round(dailyMap.get(dayStr) || 0),
+        faturamento: Math.round(values.faturamento),
+        lucro: Math.round(values.lucro),
       };
     });
   }, []);
@@ -116,22 +125,28 @@ export function useDailyAggregates() {
     startDay: number,
     endDay: number
   ): DailyChartDataPoint[] => {
-    const dailyMap = new Map<number, number>();
+    const dailyMap = new Map<number, { faturamento: number; lucro: number }>();
     
     aggregates.forEach(agg => {
       const day = parseInt(agg.date.split('-')[2], 10);
       if (day >= startDay && day <= endDay) {
-        dailyMap.set(day, (dailyMap.get(day) || 0) + agg.faturamento);
+        const existing = dailyMap.get(day) || { faturamento: 0, lucro: 0 };
+        dailyMap.set(day, {
+          faturamento: existing.faturamento + agg.faturamento,
+          lucro: existing.lucro + agg.lucro,
+        });
       }
     });
     
     const result: DailyChartDataPoint[] = [];
     for (let day = startDay; day <= endDay; day++) {
       const date = new Date(year, month - 1, day);
+      const values = dailyMap.get(day) || { faturamento: 0, lucro: 0 };
       result.push({
         dia: String(day).padStart(2, '0'),
         diaSemana: diasSemana[date.getDay()],
-        faturamento: Math.round(dailyMap.get(day) || 0),
+        faturamento: Math.round(values.faturamento),
+        lucro: Math.round(values.lucro),
       });
     }
     

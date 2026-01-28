@@ -1,0 +1,2 @@
+ALTER TABLE erp_daily_aggregates 
+ADD COLUMN IF NOT EXISTS total_lucro NUMERIC DEFAULT 0;

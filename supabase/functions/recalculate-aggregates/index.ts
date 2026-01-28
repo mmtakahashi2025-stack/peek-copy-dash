@@ -154,9 +154,8 @@ Deno.serve(async (req) => {
         }
 
         // ========================================
-        // DEDUPLICATION: Use Set to track unique Venda # + Item combinations
+        // NOTE: NO deduplication - use all records as per ERP validation
         // ========================================
-        const processedKeys = new Set<string>();
 
         // ========================================
         // DAILY AGGREGATES
@@ -185,23 +184,18 @@ Deno.serve(async (req) => {
         let globalMonthlyTotal = { faturamento: 0, lucro: 0, vendas: 0 };
 
         rawData.forEach(row => {
-          // DEDUPLICATION: Skip if already processed this Venda # + Item combination
-          const dedupeKey = `${row['Venda #']}|${row.Item}`;
-          if (processedKeys.has(dedupeKey)) return;
-          processedKeys.add(dedupeKey);
-
           const rowDate = parseRowDate(row['Data Venda']);
           if (!rowDate) return;
+
+          // CORRECTED: Both Faturamento and Lucro EXCLUDE PC types (validated against ERP)
+          const isPC = row.Tipo === 'PC';
+          if (isPC) return; // Skip PC items entirely
 
           const dateStr = rowDate.toISOString().split('T')[0];
           const filial = normalizeFilialId(row.Filial || 'todas');
           const colaborador = row.Emissor || null;
           const liquido = row.Líquido || 0;
           const lucro = row.Lucro || 0;
-
-          // IMPORTANT: Faturamento excludes PC types, Lucro includes ALL types
-          const isPC = row.Tipo === 'PC';
-          const faturamentoValue = isPC ? 0 : liquido;
 
           // Per colaborador - DAILY
           if (colaborador) {
@@ -210,9 +204,9 @@ Deno.serve(async (req) => {
               dailyMap.set(key, { date: dateStr, filial, colaborador, faturamento: 0, lucro: 0, vendas: 0 });
             }
             const entry = dailyMap.get(key)!;
-            entry.faturamento += faturamentoValue;
+            entry.faturamento += liquido;
             entry.lucro += lucro;
-            if (!isPC) entry.vendas += 1;
+            entry.vendas += 1;
           }
 
           // Filial totals - DAILY (colaborador = null)
@@ -224,18 +218,18 @@ Deno.serve(async (req) => {
             filialMap.set(dateStr, { faturamento: 0, lucro: 0, vendas: 0 });
           }
           const ft = filialMap.get(dateStr)!;
-          ft.faturamento += faturamentoValue;
+          ft.faturamento += liquido;
           ft.lucro += lucro;
-          if (!isPC) ft.vendas += 1;
+          ft.vendas += 1;
 
           // Global totals - DAILY
           if (!globalDailyTotals.has(dateStr)) {
             globalDailyTotals.set(dateStr, { faturamento: 0, lucro: 0, vendas: 0 });
           }
           const gt = globalDailyTotals.get(dateStr)!;
-          gt.faturamento += faturamentoValue;
+          gt.faturamento += liquido;
           gt.lucro += lucro;
-          if (!isPC) gt.vendas += 1;
+          gt.vendas += 1;
 
           // === MONTHLY AGGREGATES ===
           // Per colaborador - MONTHLY
@@ -245,9 +239,9 @@ Deno.serve(async (req) => {
               monthlyMap.set(monthKey, { filial, colaborador, faturamento: 0, lucro: 0, vendas: 0 });
             }
             const mEntry = monthlyMap.get(monthKey)!;
-            mEntry.faturamento += faturamentoValue;
+            mEntry.faturamento += liquido;
             mEntry.lucro += lucro;
-            if (!isPC) mEntry.vendas += 1;
+            mEntry.vendas += 1;
           }
 
           // Filial totals - MONTHLY (colaborador = null)
@@ -255,24 +249,25 @@ Deno.serve(async (req) => {
             filialMonthlyTotals.set(filial, { faturamento: 0, lucro: 0, vendas: 0 });
           }
           const fmt = filialMonthlyTotals.get(filial)!;
-          fmt.faturamento += faturamentoValue;
+          fmt.faturamento += liquido;
           fmt.lucro += lucro;
-          if (!isPC) fmt.vendas += 1;
+          fmt.vendas += 1;
 
           // Global total - MONTHLY
-          globalMonthlyTotal.faturamento += faturamentoValue;
+          globalMonthlyTotal.faturamento += liquido;
           globalMonthlyTotal.lucro += lucro;
-          if (!isPC) globalMonthlyTotal.vendas += 1;
+          globalMonthlyTotal.vendas += 1;
         });
 
-        console.log(`[Aggregates] ${period.year}-${period.month}: ${rawData.length} raw records, ${processedKeys.size} unique after dedup`);
+        console.log(`[Aggregates] ${period.year}-${period.month}: ${rawData.length} raw records (no dedup, PC excluded)`);
 
-        // Build daily aggregate rows
+        // Build daily aggregate rows (now includes total_lucro)
         const dailyRows: {
           date: string;
           filial: string;
           colaborador: string | null;
           faturamento: number;
+          total_lucro: number;
           quantidade_vendas: number;
         }[] = [];
 
@@ -283,6 +278,7 @@ Deno.serve(async (req) => {
             filial: entry.filial,
             colaborador: entry.colaborador,
             faturamento: entry.faturamento,
+            total_lucro: entry.lucro,
             quantidade_vendas: entry.vendas,
           });
         });
@@ -295,6 +291,7 @@ Deno.serve(async (req) => {
               filial,
               colaborador: null,
               faturamento: totals.faturamento,
+              total_lucro: totals.lucro,
               quantidade_vendas: totals.vendas,
             });
           });
@@ -307,6 +304,7 @@ Deno.serve(async (req) => {
             filial: 'todas',
             colaborador: null,
             faturamento: totals.faturamento,
+            total_lucro: totals.lucro,
             quantidade_vendas: totals.vendas,
           });
         });
@@ -404,7 +402,7 @@ Deno.serve(async (req) => {
         }
 
         // ========================================
-        // RANKING CACHE
+        // RANKING CACHE (also excludes PC)
         // ========================================
         const colaboradorTotals = new Map<string, { nome: string; faturamento: number; vendas: number }>();
         const produtoTotals = new Map<string, { nome: string; quantidade: number }>();
@@ -413,16 +411,9 @@ Deno.serve(async (req) => {
         const filialColabTotals = new Map<string, Map<string, { nome: string; faturamento: number; vendas: number }>>();
         const filialProdTotals = new Map<string, Map<string, { nome: string; quantidade: number }>>();
 
-        // Use separate deduplication for rankings (same logic as aggregates)
-        const rankingProcessedKeys = new Set<string>();
-
         rawData.forEach(row => {
-          // DEDUPLICATION: Skip if already processed
-          const dedupeKey = `${row['Venda #']}|${row.Item}`;
-          if (rankingProcessedKeys.has(dedupeKey)) return;
-          rankingProcessedKeys.add(dedupeKey);
-
-          if (row.Tipo === 'PC') return; // Rankings exclude PC
+          // Rankings exclude PC (already standard)
+          if (row.Tipo === 'PC') return;
 
           const filial = normalizeFilialId(row.Filial || 'todas');
           const colaborador = row.Emissor || 'Desconhecido';

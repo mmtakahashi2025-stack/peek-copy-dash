@@ -150,9 +150,7 @@ export function useChartAggregates() {
     }
 
     try {
-      // DEDUPLICATION: Use Set to track unique Venda # + Item combinations
-      const processedKeys = new Set<string>();
-
+      // NOTE: NO deduplication - use all records as per ERP validation
       // Group by filial + colaborador
       const aggregatesMap = new Map<string, {
         filial: string;
@@ -171,19 +169,14 @@ export function useChartAggregates() {
       }>();
 
       data.forEach(row => {
-        // DEDUPLICATION: Skip if already processed this Venda # + Item combination
-        const dedupeKey = `${row['Venda #']}|${row.Item}`;
-        if (processedKeys.has(dedupeKey)) return;
-        processedKeys.add(dedupeKey);
-
         const filial = row.Filial || 'todas';
         const colaborador = row.Emissor || null;
         const liquido = row.Líquido || 0;
         const lucro = row.Lucro || 0;
         
-        // IMPORTANT: Faturamento excludes PC types, Lucro includes ALL types
+        // CORRECTED: Both Faturamento and Lucro EXCLUDE PC types (validated against ERP)
         const isPC = row.Tipo === 'PC';
-        const faturamentoValue = isPC ? 0 : liquido;
+        if (isPC) return; // Skip PC items entirely
 
         // Per colaborador aggregate
         if (colaborador) {
@@ -192,9 +185,9 @@ export function useChartAggregates() {
             aggregatesMap.set(key, { filial, colaborador, faturamento: 0, lucro: 0, vendas: 0 });
           }
           const agg = aggregatesMap.get(key)!;
-          agg.faturamento += faturamentoValue;
+          agg.faturamento += liquido;
           agg.lucro += lucro;
-          if (!isPC) agg.vendas += 1;
+          agg.vendas += 1;
         }
 
         // Per filial total (colaborador = null)
@@ -202,12 +195,12 @@ export function useChartAggregates() {
           filialTotals.set(filial, { filial, faturamento: 0, lucro: 0, vendas: 0 });
         }
         const ft = filialTotals.get(filial)!;
-        ft.faturamento += faturamentoValue;
+        ft.faturamento += liquido;
         ft.lucro += lucro;
-        if (!isPC) ft.vendas += 1;
+        ft.vendas += 1;
       });
 
-      console.log(`[Aggregates] Frontend: ${data.length} raw records, ${processedKeys.size} unique after dedup`);
+      console.log(`[Aggregates] Frontend: ${data.length} raw records`);
 
       // Build rows for upsert
       const rows: {
