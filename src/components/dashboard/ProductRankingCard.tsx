@@ -1,17 +1,19 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Package, Info, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useRankingCache, RankingProduto } from '@/hooks/useRankingCache';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RawSaleRow } from '@/contexts/SheetDataContext';
 
 interface ProductRankingCardProps {
-  year: number;
-  month: number;
-  filialId?: string;
   rawData?: RawSaleRow[];
+  filialId?: string;
+}
+
+// Helper function
+function normalizeFilial(filial: string): string {
+  return filial?.toLowerCase().replace(/\s+/g, '-').normalize('NFD').replace(/[\u0300-\u036f]/g, '') || 'todas';
 }
 
 // Helper to get top 3 sellers for a product
@@ -33,30 +35,37 @@ const getTop3Vendedores = (rawData: RawSaleRow[] | undefined, produtoNome: strin
     .map(([nome, quantidade]) => ({ nome, quantidade }));
 };
 
-export function ProductRankingCard({ year, month, filialId = 'todas', rawData }: ProductRankingCardProps) {
-  const { fetchRankingProdutos, isLoading } = useRankingCache();
-  const [produtos, setProdutos] = useState<RankingProduto[]>([]);
-  const [hasLoaded, setHasLoaded] = useState(false);
+export function ProductRankingCard({ rawData, filialId = 'todas' }: ProductRankingCardProps) {
+  // Calculate ranking directly from rawData
+  const produtos = useMemo(() => {
+    if (!rawData || rawData.length === 0) return [];
+    
+    // Filter by type and filial
+    let filteredData = rawData.filter(r => r.Tipo !== 'PC');
+    if (filialId && filialId !== 'todas') {
+      filteredData = filteredData.filter(r => 
+        normalizeFilial(r.Filial) === filialId
+      );
+    }
+    
+    // Group by product
+    const produtoMap = new Map<string, number>();
+    
+    filteredData.forEach(r => {
+      const nome = r.Item || 'Desconhecido';
+      produtoMap.set(nome, (produtoMap.get(nome) || 0) + (r.Quantidade || 1));
+    });
+    
+    // Convert to array, sort by quantity, and take top 10
+    return Array.from(produtoMap.entries())
+      .map(([nome, quantidade]) => ({ nome, quantidade }))
+      .sort((a, b) => b.quantidade - a.quantidade)
+      .slice(0, 10);
+  }, [rawData, filialId]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const hasData = rawData && rawData.length > 0;
 
-    const loadRanking = async () => {
-      const data = await fetchRankingProdutos(year, month, filialId);
-      if (!cancelled) {
-        setProdutos(data);
-        setHasLoaded(true);
-      }
-    };
-
-    loadRanking();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [year, month, filialId, fetchRankingProdutos]);
-
-  if (isLoading && !hasLoaded) {
+  if (!hasData) {
     return <ProductRankingCardSkeleton />;
   }
 
@@ -70,7 +79,7 @@ export function ProductRankingCard({ year, month, filialId = 'todas', rawData }:
       </CardHeader>
       <CardContent className="p-0">
         <div className="divide-y">
-          {produtos.slice(0, 10).map((produto, index) => (
+          {produtos.map((produto, index) => (
             <HoverCard key={`${produto.nome}-${index}`} openDelay={200} closeDelay={100}>
               <HoverCardTrigger asChild>
                 <div className="flex items-center gap-4 px-6 py-3 hover:bg-muted/50 transition-colors cursor-pointer">
@@ -136,7 +145,7 @@ export function ProductRankingCard({ year, month, filialId = 'todas', rawData }:
               </HoverCardContent>
             </HoverCard>
           ))}
-          {produtos.length === 0 && hasLoaded && (
+          {produtos.length === 0 && (
             <div className="px-6 py-4 text-center text-muted-foreground">
               Nenhum produto encontrado
             </div>
