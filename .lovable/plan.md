@@ -1,281 +1,186 @@
 
-# Plano Completo: Dashboard de Vendas - Correções e Melhorias
+# Plano: Rankings Sincronizados com Filtro Global de Periodo
 
-## DESCOBERTA CRÍTICA: REGRAS DE CÁLCULO ESTAVAM INCORRETAS
+## Problema Atual
 
-### Comparativo de Valores (01-27/01/2026)
+Os rankings buscam dados da tabela `erp_ranking_cache` que armazena rankings **por mes completo**. Quando o usuario seleciona um periodo especifico (ex: 01-27/Jan), os rankings mostram dados do mes inteiro, nao do periodo selecionado.
 
-| Métrica | ERP (referência) | Nossa regra atual | Diferença |
-|---------|------------------|-------------------|-----------|
-| Faturamento | **R$ 1.380.611,79** | R$ 1.128.502 | -18% (errado) |
-| Lucro | **R$ 384.065,30** | R$ 380.225 | -1% (próximo) |
-| Lucro % | **27,82%** | 33,69% | +6 pts (errado) |
+## Solucao
 
-### Causa Raiz Identificada
-
-A **deduplicação por "Venda # + Item"** estava INCORRETA. Validação SQL mostrou:
-
-- Faturamento SEM PC e **SEM deduplicação**: R$ 1.380.611,79 (IGUAL ao ERP)
-- Faturamento SEM PC e COM deduplicação: R$ 1.128.502 (18% menor - ERRADO)
-
-### Regras CORRETAS (validadas contra ERP)
-
-| Métrica | Regra CORRETA | Regra ANTERIOR (errada) |
-|---------|---------------|-------------------------|
-| Faturamento | SEM PC, **SEM deduplicação** | SEM PC, COM deduplicação |
-| Lucro | SEM PC, **SEM deduplicação** | COM PC, COM deduplicação |
-| Lucro % | Lucro / Faturamento (ambos sem PC) | Lucro (com PC) / Faturamento (sem PC) |
-| Vendas | IDs únicos de Venda # (sem PC) | Mantém |
-| P.A. | Quantidade / Vendas (sem PC) | Mantém |
+Calcular os rankings diretamente do `rawData` que ja esta filtrado pelo periodo global. Isso elimina a dependencia do cache mensal e garante consistencia com os KPIs.
 
 ---
 
-## PARTE 1: CORREÇÕES DE INTEGRIDADE DE DADOS
+## Arquivos a Modificar
 
-### 1.1 Atualizar Lógica de Cálculo (CRÍTICO)
+| Arquivo | Mudanca |
+|---------|---------|
+| `RankingCard.tsx` | Calcular ranking de colaboradores a partir do rawData |
+| `ProductRankingCard.tsx` | Calcular ranking de produtos a partir do rawData |
+| `Dashboard.tsx` | Remover props year/month, manter apenas rawData e filialId |
 
-**Arquivos afetados:**
-- `src/contexts/SheetDataContext.tsx` - Remover deduplicação, ajustar lucro
-- `supabase/functions/recalculate-aggregates/index.ts` - Mesma correção
-- `src/hooks/useChartAggregates.ts` - Mesma correção
+---
 
-**Mudança principal:**
+## Implementacao
+
+### 1. RankingCard.tsx - Ranking de Colaboradores
+
+**Nova interface:**
 ```typescript
-// ANTES (errado):
-const processedKeys = new Set<string>();
-rawData.forEach(row => {
-  const key = `${row['Venda #']}|${row.Item}`;
-  if (processedKeys.has(key)) return;  // REMOVER ISSO
-  processedKeys.add(key);
-  // ...
-});
-const totalLucro = uniqueData.reduce((sum, r) => sum + (r.Lucro || 0), 0); // Incluía PC
-
-// DEPOIS (correto):
-// SEM deduplicação - usar todos os registros
-const totalLucro = data.filter(r => r.Tipo !== 'PC').reduce((sum, r) => sum + (r.Lucro || 0), 0);
+interface RankingCardProps {
+  rawData?: RawSaleRow[];
+  filialId?: string;
+}
 ```
 
-### 1.2 Adicionar Coluna total_lucro em erp_daily_aggregates
-
-**Migration SQL:**
-```sql
-ALTER TABLE erp_daily_aggregates 
-ADD COLUMN IF NOT EXISTS total_lucro NUMERIC DEFAULT 0;
+**Nova logica de calculo:**
+```typescript
+const colaboradores = useMemo(() => {
+  if (!rawData || rawData.length === 0) return [];
+  
+  // Filtrar por filial se necessario
+  let filteredData = rawData.filter(r => r.Tipo !== 'PC');
+  if (filialId && filialId !== 'todas') {
+    filteredData = filteredData.filter(r => 
+      normalizeFilial(r.Filial) === filialId
+    );
+  }
+  
+  // Agrupar por colaborador
+  const colaboradorMap = new Map<string, { faturamento: number; vendas: Set<number> }>();
+  
+  filteredData.forEach(r => {
+    const nome = r.Emissor || 'Desconhecido';
+    const current = colaboradorMap.get(nome) || { faturamento: 0, vendas: new Set() };
+    current.faturamento += r.Liquido || 0;
+    if (r['Venda #']) current.vendas.add(r['Venda #']);
+    colaboradorMap.set(nome, current);
+  });
+  
+  // Converter para array e ordenar por faturamento
+  return Array.from(colaboradorMap.entries())
+    .map(([nome, data], index) => ({
+      nome,
+      iniciais: getInitials(nome),
+      vendas: data.vendas.size,
+      faturamento: data.faturamento,
+      faturamentoFormatado: formatCurrency(data.faturamento),
+      conversao: '--',
+      cor: colors[index % colors.length],
+    }))
+    .sort((a, b) => b.faturamento - a.faturamento)
+    .slice(0, 10);
+}, [rawData, filialId]);
 ```
 
-### 1.3 Atualizar Edge Function recalculate-aggregates
+### 2. ProductRankingCard.tsx - Ranking de Produtos
 
-- Remover lógica de deduplicação
-- Lucro: excluir tipo PC (não incluir)
-- Garantir INSERT de total_lucro nos agregados diários
-
-### 1.4 Executar Recálculo Completo
-
-Após correções:
+**Nova interface:**
+```typescript
+interface ProductRankingCardProps {
+  rawData?: RawSaleRow[];
+  filialId?: string;
+}
 ```
-POST /functions/v1/recalculate-aggregates
-Body: { "forceAll": true }
+
+**Nova logica de calculo:**
+```typescript
+const produtos = useMemo(() => {
+  if (!rawData || rawData.length === 0) return [];
+  
+  // Filtrar por filial e excluir PC
+  let filteredData = rawData.filter(r => r.Tipo !== 'PC');
+  if (filialId && filialId !== 'todas') {
+    filteredData = filteredData.filter(r => 
+      normalizeFilial(r.Filial) === filialId
+    );
+  }
+  
+  // Agrupar por produto
+  const produtoMap = new Map<string, number>();
+  
+  filteredData.forEach(r => {
+    const nome = r.Item || 'Desconhecido';
+    produtoMap.set(nome, (produtoMap.get(nome) || 0) + (r.Quantidade || 1));
+  });
+  
+  // Converter para array e ordenar por quantidade
+  return Array.from(produtoMap.entries())
+    .map(([nome, quantidade]) => ({ nome, quantidade }))
+    .sort((a, b) => b.quantidade - a.quantidade)
+    .slice(0, 10);
+}, [rawData, filialId]);
+```
+
+### 3. Dashboard.tsx - Atualizar Props
+
+**Mudanca:**
+```typescript
+// ANTES
+<RankingCard 
+  year={filters.dateFrom?.getFullYear() ?? new Date().getFullYear()} 
+  month={(filters.dateFrom?.getMonth() ?? new Date().getMonth() - 1) + 1} 
+  filialId={filters.filial}
+  rawData={rawData}
+/>
+
+// DEPOIS
+<RankingCard 
+  rawData={rawData}
+  filialId={filters.filial}
+/>
 ```
 
 ---
 
-## PARTE 2: SINCRONIZAÇÃO DE FILTROS
+## Helpers Necessarios
 
-### 2.1 Problema Atual
-
-O card de Evolução de Vendas tem seletores independentes de ano/mês, podendo mostrar dados de período diferente do filtro global.
-
-### 2.2 Solução
-
-Remover estados independentes e derivar do filtro global:
+Adicionar nos componentes (ou em utils):
 
 ```typescript
-// ANTES:
-const [selectedYear, setSelectedYear] = useState(...)
-
-// DEPOIS:
-const selectedYear = dateFrom?.getFullYear() ?? new Date().getFullYear();
-const selectedMonth = dateFrom?.getMonth() ?? new Date().getMonth();
-```
-
-O card manterá apenas toggle ANO/MÊS, mas sempre respeitando o período do filtro global.
-
----
-
-## PARTE 3: KPIs COM COMPARAÇÃO ANO ANTERIOR
-
-### 3.1 Lógica de Comparação
-
-Para cada KPI, calcular valor do mesmo período do ano anterior e mostrar variação:
-
-```typescript
-interface KpiData {
-  // ... campos existentes
-  previousValue: string;    // Ex: "R$ 1.200.000"
-  variation: number;        // Ex: 12.5 (%)
-  isPositive: boolean;      // true = crescimento
+function getInitials(name: string): string {
+  return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
 }
 
-// Cálculo:
-const currentValue = calcular(dadosPeriodoAtual);
-const previousValue = calcular(dadosAnoAnterior);
-const variation = previousValue > 0 
-  ? ((currentValue - previousValue) / previousValue) * 100 
-  : 0;
-```
+function formatCurrency(value: number): string {
+  if (value >= 1000000) return `R$ ${(value / 1000000).toFixed(1)}M`;
+  if (value >= 1000) return `R$ ${(value / 1000).toFixed(0)}K`;
+  return `R$ ${value.toFixed(2)}`;
+}
 
-### 3.2 Mudanças em Dashboard.tsx
-
-- Filtrar rawData para extrair dados do ano anterior
-- Passar previousYearData para getKpis()
-
----
-
-## PARTE 4: TOOLTIPS INTERATIVOS NOS RANKINGS
-
-### 4.1 Produtos Mais Vendidos - Top 3 Vendedores
-
-Ao passar mouse sobre produto, exibir:
-```
-Produto: Passeio Cataratas
-Quantidade: 450 unidades
-
-Top 3 Vendedores:
-1. João Silva - 120 un.
-2. Maria Santos - 98 un.
-3. Pedro Lima - 85 un.
-```
-
-### 4.2 Ranking Colaboradores - Top 3 Produtos
-
-Ao passar mouse sobre colaborador, exibir:
-```
-João Silva
-Faturamento: R$ 125.430
-
-Top 3 Produtos:
-1. Passeio Cataratas - 120 un.
-2. City Tour - 45 un.
-3. Combo Aventura - 32 un.
-```
-
-### 4.3 Implementação
-
-- Receber `rawData` via props
-- Calcular top 3 on-demand (no hover)
-- Zero chamadas de API adicionais
-
----
-
-## PARTE 5: MELHORIAS VISUAIS
-
-### 5.1 Substituir Emojis por Ícones Lucide
-
-```typescript
-// ANTES:
-💰 Faturamento Anual:
-📊 Lucro Anual:
-
-// DEPOIS:
-<DollarSign className="h-4 w-4" /> Faturamento Anual:
-<TrendingUp className="h-4 w-4" /> Lucro Anual:
-```
-
-### 5.2 Toggle Funcional na Aba MÊS
-
-```typescript
-// ANTES (hardcoded):
-<Bar dataKey="faturamento" />
-
-// DEPOIS (dinâmico):
-<Bar dataKey={viewMode === 'lucro' ? 'lucro' : 'faturamento'} />
-```
-
-### 5.3 Alturas Responsivas
-
-```typescript
-className="h-[200px] lg:h-[280px]"
+function normalizeFilial(filial: string): string {
+  return filial?.toLowerCase().replace(/\s+/g, '-').normalize('NFD').replace(/[\u0300-\u036f]/g, '') || 'todas';
+}
 ```
 
 ---
 
-## PARTE 6: PLANO DE EXECUÇÃO (Otimizado para Créditos)
+## Vantagens da Solucao
 
-### Ordem de Execução
-
-| Etapa | Arquivo | Operação | Dependência |
-|-------|---------|----------|-------------|
-| 1 | Migration SQL | 1 migration | - |
-| 2 | recalculate-aggregates/index.ts | 1 edit | Etapa 1 |
-| 3a | SheetDataContext.tsx | 1 edit | - |
-| 3b | useDailyAggregates.ts | 1 edit (paralelo) | Etapa 1 |
-| 3c | useChartAggregates.ts | 1 edit (paralelo) | - |
-| 4 | Deploy edge function | 1 deploy | Etapa 2 |
-| 5 | SalesEvolutionChart.tsx | 1 edit | Etapa 3b |
-| 6a | RankingCard.tsx | 1 edit (paralelo) | - |
-| 6b | ProductRankingCard.tsx | 1 edit (paralelo) | - |
-| 7 | Dashboard.tsx | 1 edit | Etapas 3a, 6a, 6b |
-| 8 | Executar recálculo | POST API | Etapa 4 |
-
-### Estratégia de Economia
-
-- Etapas 3a, 3b, 3c em paralelo
-- Etapas 6a, 6b em paralelo
-- Total: ~9 operações (vs 12+ sequenciais)
+| Aspecto | Antes (Cache) | Depois (rawData) |
+|---------|---------------|------------------|
+| Precisao do periodo | Mes completo | Periodo exato |
+| Chamadas de API | 2 queries extras | Zero (usa dados em memoria) |
+| Consistencia | Diferente dos KPIs | Igual aos KPIs |
+| Performance | Rapido (cache) | Rapido (useMemo) |
 
 ---
 
-## PARTE 7: VALIDAÇÃO FINAL
+## Execucao
 
-### Checklist de Validação (01-27/01/2026)
+| Etapa | Arquivo | Operacao |
+|-------|---------|----------|
+| 1 | RankingCard.tsx | 1 edit - calcular do rawData |
+| 2 | ProductRankingCard.tsx | 1 edit - calcular do rawData |
+| 3 | Dashboard.tsx | 1 edit - remover year/month |
 
-| Métrica | Esperado (ERP) | Tolerância |
-|---------|----------------|------------|
-| Faturamento | R$ 1.380.611,79 | ±R$ 100 |
-| Lucro | R$ 384.065,30 | ±R$ 15.000* |
-| Lucro % | 27,82% | ±1 ponto |
-
-*Nota: Diferença de ~R$ 15k no lucro pode ser devido a ajustes internos do ERP (comissões, arredondamentos).
-
-### Funcionalidades
-
-- Toggle LUCRO/FATURAMENTO funcional em ambas as abas
-- Período sincronizado com filtro global
-- KPIs com variação vs ano anterior
-- Tooltips com Top 3 cruzados
+**Total: 3 operacoes**
 
 ---
 
-## ARQUIVOS A MODIFICAR
+## Resultado Esperado
 
-| Arquivo | Mudanças |
-|---------|----------|
-| Migration SQL | +coluna `total_lucro` |
-| `recalculate-aggregates/index.ts` | Remover dedup, lucro sem PC, INSERT diário |
-| `SheetDataContext.tsx` | Remover dedup, lucro sem PC, comparação YoY |
-| `useChartAggregates.ts` | Remover dedup, lucro sem PC |
-| `useDailyAggregates.ts` | Interface + query com lucro |
-| `SalesEvolutionChart.tsx` | Sincronização + Toggle + Ícones |
-| `RankingCard.tsx` | Props rawData + tooltip Top 3 produtos |
-| `ProductRankingCard.tsx` | Props rawData + tooltip Top 3 vendedores |
-| `Dashboard.tsx` | Filtrar ano anterior, passar rawData |
-
----
-
-## RESULTADO ESPERADO
-
-### Valores Corretos (01-27/01/2026)
-
-| KPI | Valor | Variação YoY |
-|-----|-------|--------------|
-| Faturamento | R$ 1.380.611 | +X% vs Jan/25 |
-| Lucro | R$ 384.065 | +X% vs Jan/25 |
-| Lucro % | 27,82% | +X pts vs Jan/25 |
-
-### UX Final
-
-- Filtro global controla todos os componentes
-- Gráfico mostra período selecionado (não independente)
-- KPIs mostram crescimento vs ano anterior
-- Rankings com tooltips informativos
+- Rankings mostram dados do **periodo exato** selecionado no filtro global
+- Tooltips (Top 3) continuam funcionando usando o mesmo rawData
+- Consistencia total entre KPIs, Grafico e Rankings
+- Zero chamadas de API adicionais para rankings
