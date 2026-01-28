@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 import { DashboardFilters } from '@/components/dashboard/DashboardFilters';
 import { KPICard, KPICardSkeleton } from '@/components/dashboard/KPICard';
@@ -25,7 +25,7 @@ interface Filters {
 }
 
 export default function Dashboard() {
-  const { rawData, isLoading, isConnected, getKpis, getColaboradores, getProdutos, fetchExcellencePercentage, fetchLeadsTotal, loadErpData, cancelLoading, erpCredentials, refreshErpCredentials, loadingProgress, isAdmin: isAdminFromContext } = useSheetData();
+  const { rawData, isLoading, isConnected, getKpis, fetchExcellencePercentage, fetchLeadsTotal, loadErpData, cancelLoading, erpCredentials, loadingProgress } = useSheetData();
   const { isAdmin } = useUserRole();
   
   // Default to last complete month
@@ -122,14 +122,8 @@ export default function Dashboard() {
     }
   }, [filters.dateFrom, filters.dateTo, erpCredentials?.hasPassword, loadErpData]);
 
-  const colaboradores = useMemo(
-    () => getColaboradores(filters.filial, filters.colaborador),
-    [getColaboradores, filters.filial, filters.colaborador]
-  );
-  const produtos = useMemo(
-    () => getProdutos(filters.filial),
-    [getProdutos, filters.filial]
-  );
+  // These are now fetched directly from cache in the ranking components
+  // Keeping the hasData check based on rawData for loading states
 
   const hasData = rawData.length > 0;
 
@@ -234,10 +228,18 @@ export default function Dashboard() {
           compareDateTo={filters.compareDateTo}
         />
         
-        {/* Rankings Side by Side */}
+        {/* Rankings Side by Side - Using pre-calculated cache */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <RankingCard colaboradores={colaboradores} rawData={rawData} />
-          <ProductRankingCard produtos={produtos} rawData={rawData} />
+          <RankingCard 
+            year={filters.dateFrom?.getFullYear() ?? new Date().getFullYear()} 
+            month={(filters.dateFrom?.getMonth() ?? new Date().getMonth() - 1) + 1} 
+            filialId={filters.filial} 
+          />
+          <ProductRankingCard 
+            year={filters.dateFrom?.getFullYear() ?? new Date().getFullYear()} 
+            month={(filters.dateFrom?.getMonth() ?? new Date().getMonth() - 1) + 1} 
+            filialId={filters.filial} 
+          />
         </div>
       </main>
     </div>
