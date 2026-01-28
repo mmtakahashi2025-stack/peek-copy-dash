@@ -1,139 +1,95 @@
 
 
-# Plano: Simplificar Tooltip e Adicionar Legendas Anuais
+# Plano: Corrigir Cálculo do Lucro - Usar Dados Reais do ERP
 
-## Resumo das Mudanças
+## Problema Identificado
 
-1. **Tooltip simplificado** - Mostrar apenas faturamento OU lucro dependendo do modo selecionado
-2. **Legendas de melhor/pior mês** - Já adaptam ao viewMode (funcionando)
-3. **Novas legendas de totais anuais** - Adicionar faturamento anual e lucro anual abaixo do gráfico
+O gráfico está mostrando **R$ 275.037** para o lucro de Janeiro 2026, mas o valor correto é **~R$ 391.301,39**.
+
+### Causa Raiz
+
+A edge function `recalculate-aggregates` está calculando o lucro incorretamente:
+
+```typescript
+// ATUAL (linha 193) - ERRADO!
+const lucro = liquido * 0.2; // Calcula 20% fixo
+```
+
+Porém, os dados brutos do ERP **já contêm o campo `Lucro` real**:
+
+| Campo | Exemplo |
+|-------|---------|
+| Líquido | R$ 128,25 |
+| Lucro | R$ 13,25 (real do ERP) |
+| % Lucro | 10,33% |
+
+**Dados verificados no banco:**
+- Lucro REAL (soma do campo `Lucro`): **R$ 406.046,82**
+- Lucro calculado com 20%: ~R$ 280.000 (incorreto)
+
+---
+
+## Solução
+
+Modificar a edge function para usar o campo `Lucro` real dos dados do ERP ao invés de calcular uma margem fictícia.
 
 ---
 
 ## Mudanças Necessárias
 
-### Arquivo: `src/components/dashboard/SalesEvolutionChart.tsx`
+### Arquivo: `supabase/functions/recalculate-aggregates/index.ts`
 
-#### 1. Modificar `AnnualTooltipContent` (linhas 60-126)
+#### 1. Atualizar interface `RawSaleRow` (linhas 8-17)
 
-Simplificar o tooltip para mostrar apenas a métrica ativa. O tooltip precisa receber o `viewMode` como prop.
-
-**De (mostra ambos faturamento e lucro):**
-```typescript
-const AnnualTooltipContent = ({ active, payload, label }: any) => {
-  // ... mostra faturamento E lucro sempre
-};
-```
-
-**Para (mostra apenas a métrica selecionada):**
-```typescript
-const AnnualTooltipContent = ({ active, payload, label, viewMode }: any) => {
-  const dataPoint = payload[0]?.payload;
-  if (!dataPoint) return null;
-  
-  const isLucro = viewMode === 'lucro';
-  const atual = isLucro ? dataPoint.lucro : dataPoint.faturamento;
-  const anterior = isLucro ? dataPoint.lucroAnterior : dataPoint.faturamentoAnterior;
-  const variacao = anterior > 0 ? ((atual - anterior) / anterior) * 100 : 0;
-  const isGrowth = atual > anterior;
-  const isDecline = atual < anterior;
-  
-  return (
-    <div className="...">
-      <p className="font-medium mb-2">{label}</p>
-      <span>{isLucro ? 'LUCRO' : 'FATURAMENTO'}</span>
-      <span>{formatCurrencyFull(atual)} ({variacao}%)</span>
-      <span>Ano anterior: {formatCurrencyFull(anterior)}</span>
-    </div>
-  );
-};
-```
-
-#### 2. Passar `viewMode` para o tooltip (linha 495)
+Adicionar o campo `Lucro`:
 
 ```typescript
-<ChartTooltip content={<AnnualTooltipContent viewMode={viewMode} />} />
+interface RawSaleRow {
+  Filial: string;
+  Emissor: string;
+  'Venda #': number;
+  'Data Venda': number | string;
+  Item: string;
+  Tipo: string;
+  Quantidade: number;
+  Líquido: number;
+  Lucro: number;  // <-- ADICIONAR
+}
 ```
 
-#### 3. Adicionar cálculo de totais anuais (novo useMemo após linha 376)
+#### 2. Usar o campo Lucro real (linha 193)
 
+**De:**
 ```typescript
-const annualTotals = useMemo(() => {
-  const totalFaturamento = yearlyComparisonData.reduce((sum, d) => sum + d.faturamento, 0);
-  const totalFaturamentoAnterior = yearlyComparisonData.reduce((sum, d) => sum + d.faturamentoAnterior, 0);
-  const totalLucro = yearlyComparisonData.reduce((sum, d) => sum + d.lucro, 0);
-  const totalLucroAnterior = yearlyComparisonData.reduce((sum, d) => sum + d.lucroAnterior, 0);
-  
-  const variacaoFat = totalFaturamentoAnterior > 0 
-    ? ((totalFaturamento - totalFaturamentoAnterior) / totalFaturamentoAnterior) * 100 
-    : 0;
-  const variacaoLucro = totalLucroAnterior > 0 
-    ? ((totalLucro - totalLucroAnterior) / totalLucroAnterior) * 100 
-    : 0;
-  
-  return {
-    faturamento: totalFaturamento,
-    faturamentoAnterior: totalFaturamentoAnterior,
-    lucro: totalLucro,
-    lucroAnterior: totalLucroAnterior,
-    variacaoFat,
-    variacaoLucro,
-  };
-}, [yearlyComparisonData]);
+const lucro = liquido * 0.2; // Default 20% margin
 ```
 
-#### 4. Adicionar legendas de totais anuais (após linha 545, antes de fechar TabsContent)
-
-Nova seção abaixo das legendas de melhor/pior mês:
-
-```text
-╔══════════════════════════════════════════════════════════════════════════╗
-║  📈 Melhor: Dezembro - R$ 1.850.000    ↑ +15.2%                          ║
-║  📉 Pior: Fevereiro - R$ 620.000       ↓ -8.5%                           ║
-║  ─────────────────────────────────────────────────────────────────────── ║
-║  💰 Faturamento Anual: R$ 12.500.000 (2024: R$ 11.200.000)   ↑ +11.6%    ║
-║  📊 Lucro Anual: R$ 2.500.000 (2024: R$ 2.150.000)           ↑ +16.3%    ║
-╚══════════════════════════════════════════════════════════════════════════╝
+**Para:**
+```typescript
+const lucro = row.Lucro || 0; // Usar lucro real do ERP
 ```
 
 ---
 
-## Interface Visual Final
+## Após Implementação
 
-### Tooltip (quando Faturamento selecionado)
-```text
-┌─────────────────────────────┐
-│  Dezembro                   │
-│  ───────────────────────    │
-│  FATURAMENTO                │
-│  ↗ R$ 1.850.000 (+15.2%)    │
-│  ───────────────────────    │
-│  Ano anterior:              │
-│  R$ 1.606.000               │
-└─────────────────────────────┘
+Será necessário executar o recálculo dos agregados para atualizar os valores de lucro:
+
+```bash
+POST /functions/v1/recalculate-aggregates
+Body: { "forceAll": true }
 ```
 
-### Tooltip (quando Lucro selecionado)
-```text
-┌─────────────────────────────┐
-│  Dezembro                   │
-│  ───────────────────────    │
-│  LUCRO                      │
-│  ↗ R$ 370.000 (+18.5%)      │
-│  ───────────────────────    │
-│  Ano anterior:              │
-│  R$ 312.000                 │
-└─────────────────────────────┘
-```
+Isso irá reprocessar todos os 37 meses de dados históricos com o lucro correto.
 
-### Legendas completas
-```text
-📈 Melhor: Dezembro - R$ 1.850.000    ↑ +15.2%
-📉 Pior: Fevereiro - R$ 620.000       ↓ -8.5%
-────────────────────────────────────────────────
-💰 Faturamento Anual: R$ 12.500.000   ↑ +11.6%
-📊 Lucro Anual: R$ 2.500.000          ↑ +16.3%
-```
+---
+
+## Resultado Esperado
+
+| Métrica | Antes (incorreto) | Depois (correto) |
+|---------|-------------------|------------------|
+| Lucro Jan/2026 | ~R$ 275.037 | ~R$ 406.046 |
+| Base do cálculo | 20% do faturamento | Campo `Lucro` do ERP |
 
 ---
 
@@ -141,37 +97,15 @@ Nova seção abaixo das legendas de melhor/pior mês:
 
 | Arquivo | Mudança |
 |---------|---------|
-| `src/components/dashboard/SalesEvolutionChart.tsx` | Simplificar tooltip, adicionar prop viewMode, calcular totais anuais, adicionar legendas |
-
----
-
-## Detalhes da Implementação
-
-1. **AnnualTooltipContent** (linhas 60-126): 
-   - Adicionar prop `viewMode`
-   - Usar `payload[0].payload` para acessar dados completos
-   - Renderizar apenas a métrica selecionada
-
-2. **Chamada do tooltip** (linha 495):
-   - Passar `viewMode={viewMode}` como prop
-
-3. **Novo useMemo `annualTotals`** (após linha 376):
-   - Calcular soma de todos os meses para faturamento e lucro
-   - Calcular variação percentual vs ano anterior
-
-4. **Nova seção de legendas anuais** (após linha 545):
-   - Exibir faturamento anual com variação
-   - Exibir lucro anual com variação
-   - Mostrar valores do ano anterior para contexto
+| `supabase/functions/recalculate-aggregates/index.ts` | Usar campo `Lucro` real do ERP |
 
 ---
 
 ## Complexidade
 
-Mudança de média complexidade:
-- Refatorar tooltip (~30 linhas)
-- Adicionar useMemo para totais (~15 linhas)
-- Adicionar legendas (~25 linhas)
+Mudança simples:
+- Adicionar 1 campo na interface (~1 linha)
+- Alterar 1 linha de cálculo
 
-Nenhuma alteração no banco de dados ou edge functions necessária.
+Após a mudança, executar recálculo para corrigir dados históricos.
 
