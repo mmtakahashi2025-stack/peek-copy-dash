@@ -1,148 +1,138 @@
 
 
-# Plano: Melhorias no Card de Evolução de Vendas
+# Plano: Simplificar Tooltip e Adicionar Legendas Anuais
 
-## Resumo das Mudanças Solicitadas
+## Resumo das Mudanças
 
-1. **Excluir a visão semanal** do card de evolução de vendas
-2. **Adicionar legendas** abaixo do gráfico indicando o melhor e pior mês do ano
-3. **Adicionar lucro ao tooltip** (não apenas faturamento)
-4. **Adicionar toggle Faturamento/Lucro** para alternar a visualização principal do gráfico
+1. **Tooltip simplificado** - Mostrar apenas faturamento OU lucro dependendo do modo selecionado
+2. **Legendas de melhor/pior mês** - Já adaptam ao viewMode (funcionando)
+3. **Novas legendas de totais anuais** - Adicionar faturamento anual e lucro anual abaixo do gráfico
 
 ---
 
 ## Mudanças Necessárias
 
-### 1. Alteração no Banco de Dados
+### Arquivo: `src/components/dashboard/SalesEvolutionChart.tsx`
 
-Adicionar campo `total_lucro` à tabela `erp_monthly_aggregates`:
+#### 1. Modificar `AnnualTooltipContent` (linhas 60-126)
 
-```sql
-ALTER TABLE erp_monthly_aggregates 
-ADD COLUMN IF NOT EXISTS total_lucro NUMERIC DEFAULT 0;
-```
+Simplificar o tooltip para mostrar apenas a métrica ativa. O tooltip precisa receber o `viewMode` como prop.
 
----
-
-### 2. Modificar `src/hooks/useChartAggregates.ts`
-
-- Adicionar campo `lucro: number` na interface `MonthlyAggregate`
-- Adicionar campos `lucro: number` e `lucroAnterior: number` na interface `ChartDataPoint`
-- Incluir `total_lucro` no SELECT da query `fetchAggregates`
-- Atualizar `getYearlyChartData` para incluir lucro nos dados retornados
-
----
-
-### 3. Modificar `src/components/dashboard/SalesEvolutionChart.tsx`
-
-#### 3.1 Remover Visão Semanal
-
-- Remover a aba "SEMANA" e todo o conteúdo associado
-- Remover estados: `selectedWeek`, `weeklyData`, `isLoadingWeekly`, etc.
-- Simplificar para apenas duas abas: ANO e MÊS
-
-#### 3.2 Adicionar Toggle Faturamento/Lucro
-
-Novo estado e controle:
+**De (mostra ambos faturamento e lucro):**
 ```typescript
-const [viewMode, setViewMode] = useState<'faturamento' | 'lucro'>('faturamento');
+const AnnualTooltipContent = ({ active, payload, label }: any) => {
+  // ... mostra faturamento E lucro sempre
+};
 ```
 
-Interface visual com botões de toggle:
-```
-╔══════════════════════════════════════════════════════════════╗
-║  Evolução de Vendas                                          ║
-╠══════════════════════════════════════════════════════════════╣
-║  [ ANO ]  [ MÊS ]                         [FATURAMENTO|LUCRO]║
-║                                                              ║
-║  ANO [2025 ▾]  comparado com 2024                            ║
-║  ■ 2025 (atual)   ■ 2024 (anterior)                          ║
-╚══════════════════════════════════════════════════════════════╝
-```
-
-O gráfico de barras usa dinamicamente:
-- `dataKey={viewMode === 'faturamento' ? 'faturamento' : 'lucro'}`
-- `dataKey={viewMode === 'faturamento' ? 'faturamentoAnterior' : 'lucroAnterior'}`
-
-#### 3.3 Adicionar Legendas de Melhor/Pior Mês
-
-Cálculo baseado no modo de visualização ativo:
+**Para (mostra apenas a métrica selecionada):**
 ```typescript
-const bestAndWorstMonth = useMemo(() => {
-  const metric = viewMode === 'faturamento' ? 'faturamento' : 'lucro';
-  const monthsWithData = yearlyComparisonData.filter(d => d[metric] > 0);
+const AnnualTooltipContent = ({ active, payload, label, viewMode }: any) => {
+  const dataPoint = payload[0]?.payload;
+  if (!dataPoint) return null;
   
-  if (monthsWithData.length === 0) return null;
+  const isLucro = viewMode === 'lucro';
+  const atual = isLucro ? dataPoint.lucro : dataPoint.faturamento;
+  const anterior = isLucro ? dataPoint.lucroAnterior : dataPoint.faturamentoAnterior;
+  const variacao = anterior > 0 ? ((atual - anterior) / anterior) * 100 : 0;
+  const isGrowth = atual > anterior;
+  const isDecline = atual < anterior;
   
-  const best = monthsWithData.reduce((max, curr) => 
-    curr[metric] > max[metric] ? curr : max
+  return (
+    <div className="...">
+      <p className="font-medium mb-2">{label}</p>
+      <span>{isLucro ? 'LUCRO' : 'FATURAMENTO'}</span>
+      <span>{formatCurrencyFull(atual)} ({variacao}%)</span>
+      <span>Ano anterior: {formatCurrencyFull(anterior)}</span>
+    </div>
   );
-  const worst = monthsWithData.reduce((min, curr) => 
-    curr[metric] < min[metric] ? curr : min
-  );
+};
+```
+
+#### 2. Passar `viewMode` para o tooltip (linha 495)
+
+```typescript
+<ChartTooltip content={<AnnualTooltipContent viewMode={viewMode} />} />
+```
+
+#### 3. Adicionar cálculo de totais anuais (novo useMemo após linha 376)
+
+```typescript
+const annualTotals = useMemo(() => {
+  const totalFaturamento = yearlyComparisonData.reduce((sum, d) => sum + d.faturamento, 0);
+  const totalFaturamentoAnterior = yearlyComparisonData.reduce((sum, d) => sum + d.faturamentoAnterior, 0);
+  const totalLucro = yearlyComparisonData.reduce((sum, d) => sum + d.lucro, 0);
+  const totalLucroAnterior = yearlyComparisonData.reduce((sum, d) => sum + d.lucroAnterior, 0);
   
-  return { best, worst, metric };
-}, [yearlyComparisonData, viewMode]);
+  const variacaoFat = totalFaturamentoAnterior > 0 
+    ? ((totalFaturamento - totalFaturamentoAnterior) / totalFaturamentoAnterior) * 100 
+    : 0;
+  const variacaoLucro = totalLucroAnterior > 0 
+    ? ((totalLucro - totalLucroAnterior) / totalLucroAnterior) * 100 
+    : 0;
+  
+  return {
+    faturamento: totalFaturamento,
+    faturamentoAnterior: totalFaturamentoAnterior,
+    lucro: totalLucro,
+    lucroAnterior: totalLucroAnterior,
+    variacaoFat,
+    variacaoLucro,
+  };
+}, [yearlyComparisonData]);
 ```
 
-Renderização abaixo do gráfico:
+#### 4. Adicionar legendas de totais anuais (após linha 545, antes de fechar TabsContent)
+
+Nova seção abaixo das legendas de melhor/pior mês:
+
+```text
+╔══════════════════════════════════════════════════════════════════════════╗
+║  📈 Melhor: Dezembro - R$ 1.850.000    ↑ +15.2%                          ║
+║  📉 Pior: Fevereiro - R$ 620.000       ↓ -8.5%                           ║
+║  ─────────────────────────────────────────────────────────────────────── ║
+║  💰 Faturamento Anual: R$ 12.500.000 (2024: R$ 11.200.000)   ↑ +11.6%    ║
+║  📊 Lucro Anual: R$ 2.500.000 (2024: R$ 2.150.000)           ↑ +16.3%    ║
+╚══════════════════════════════════════════════════════════════════════════╝
 ```
-📈 Melhor: Dezembro - R$ 1.850.000    ↑ +15.2%
-📉 Pior: Fevereiro - R$ 620.000       ↓ -8.5%
-```
-
-#### 3.4 Atualizar Tooltip
-
-O tooltip sempre mostra ambos (faturamento e lucro), independente do modo:
-```
-┌─────────────────────────────┐
-│  Dezembro                   │
-│  ───────────────────────    │
-│  Faturamento:               │
-│  R$ 1.850.000  (+15.2%)     │
-│                             │
-│  Lucro:                     │
-│  R$ 370.000  (+18.5%)       │
-│  ───────────────────────    │
-│  Ano anterior:              │
-│  Fat: R$ 1.606.000          │
-│  Lucro: R$ 312.000          │
-└─────────────────────────────┘
-```
-
----
-
-### 4. Atualizar Edge Function
-
-Modificar `supabase/functions/recalculate-aggregates/index.ts` para calcular e salvar `total_lucro` junto com os demais campos ao processar os dados mensais.
 
 ---
 
 ## Interface Visual Final
 
+### Tooltip (quando Faturamento selecionado)
+```text
+┌─────────────────────────────┐
+│  Dezembro                   │
+│  ───────────────────────    │
+│  FATURAMENTO                │
+│  ↗ R$ 1.850.000 (+15.2%)    │
+│  ───────────────────────    │
+│  Ano anterior:              │
+│  R$ 1.606.000               │
+└─────────────────────────────┘
 ```
-╔══════════════════════════════════════════════════════════════════════════╗
-║  Evolução de Vendas                                                      ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║  ┌─────┐ ┌─────┐                                    ┌────────────────┐   ║
-║  │ ANO │ │ MÊS │                                    │FATURAMENTO│LUCRO│  ║
-║  └─────┘ └─────┘                                    └────────────────┘   ║
-║                                                                          ║
-║  ANO [2025 ▾]  comparado com 2024                                        ║
-║  ■ 2025 (atual)   ■ 2024 (anterior)                                      ║
-║                                                                          ║
-║  ┌────────────────────────────────────────────────────────────────────┐  ║
-║  │                    ▇▇                                              │  ║
-║  │  ▇▇               ▇▇▇  ▇▇                                         │  ║
-║  │  ▇▇  ▇▇      ▇▇  ▇▇▇  ▇▇  ▇▇                                      │  ║
-║  │  ▇▇  ▇▇  ▇▇  ▇▇  ▇▇▇  ▇▇  ▇▇  ▇▇  ▇▇  ▇▇  ▇▇  ▇▇                  │  ║
-║  │  Jan Fev Mar Abr Mai Jun Jul Ago Set Out Nov Dez                   │  ║
-║  └────────────────────────────────────────────────────────────────────┘  ║
-║                                                                          ║
-║  📈 Melhor: Dezembro - R$ 1.850.000    ↑ +15.2%                          ║
-║  📉 Pior: Fevereiro - R$ 620.000       ↓ -8.5%                           ║
-║                                                                          ║
-╚══════════════════════════════════════════════════════════════════════════╝
+
+### Tooltip (quando Lucro selecionado)
+```text
+┌─────────────────────────────┐
+│  Dezembro                   │
+│  ───────────────────────    │
+│  LUCRO                      │
+│  ↗ R$ 370.000 (+18.5%)      │
+│  ───────────────────────    │
+│  Ano anterior:              │
+│  R$ 312.000                 │
+└─────────────────────────────┘
+```
+
+### Legendas completas
+```text
+📈 Melhor: Dezembro - R$ 1.850.000    ↑ +15.2%
+📉 Pior: Fevereiro - R$ 620.000       ↓ -8.5%
+────────────────────────────────────────────────
+💰 Faturamento Anual: R$ 12.500.000   ↑ +11.6%
+📊 Lucro Anual: R$ 2.500.000          ↑ +16.3%
 ```
 
 ---
@@ -151,43 +141,37 @@ Modificar `supabase/functions/recalculate-aggregates/index.ts` para calcular e s
 
 | Arquivo | Mudança |
 |---------|---------|
-| Migração SQL | Adicionar coluna `total_lucro` em `erp_monthly_aggregates` |
-| `src/hooks/useChartAggregates.ts` | Incluir lucro nas interfaces e queries |
-| `src/components/dashboard/SalesEvolutionChart.tsx` | Remover SEMANA, adicionar toggle, legendas, tooltip |
-| `supabase/functions/recalculate-aggregates/index.ts` | Calcular e salvar lucro |
+| `src/components/dashboard/SalesEvolutionChart.tsx` | Simplificar tooltip, adicionar prop viewMode, calcular totais anuais, adicionar legendas |
 
 ---
 
-## Fluxo de Implementação
+## Detalhes da Implementação
 
-```text
-1. Migração DB: Adicionar coluna total_lucro
-            |
-            v
-2. Atualizar useChartAggregates hook
-   - Incluir lucro no fetch e cálculo
-            |
-            v
-3. Refatorar SalesEvolutionChart
-   - Remover aba SEMANA (~200 linhas)
-   - Adicionar toggle Faturamento/Lucro
-   - Adicionar legendas melhor/pior mês
-   - Atualizar tooltip com lucro
-            |
-            v
-4. Atualizar recalculate-aggregates
-   - Incluir cálculo de lucro
-            |
-            v
-5. Executar recálculo para popular lucro histórico
-```
+1. **AnnualTooltipContent** (linhas 60-126): 
+   - Adicionar prop `viewMode`
+   - Usar `payload[0].payload` para acessar dados completos
+   - Renderizar apenas a métrica selecionada
+
+2. **Chamada do tooltip** (linha 495):
+   - Passar `viewMode={viewMode}` como prop
+
+3. **Novo useMemo `annualTotals`** (após linha 376):
+   - Calcular soma de todos os meses para faturamento e lucro
+   - Calcular variação percentual vs ano anterior
+
+4. **Nova seção de legendas anuais** (após linha 545):
+   - Exibir faturamento anual com variação
+   - Exibir lucro anual com variação
+   - Mostrar valores do ano anterior para contexto
 
 ---
 
-## Considerações Técnicas
+## Complexidade
 
-- O toggle usa `ToggleGroup` do shadcn/ui para consistência visual
-- As legendas de melhor/pior mês se adaptam ao modo de visualização selecionado
-- O tooltip sempre mostra informação completa (faturamento + lucro) para contexto
-- Após implementação, será necessário executar o recálculo de agregados para popular o campo `total_lucro` nos dados históricos
+Mudança de média complexidade:
+- Refatorar tooltip (~30 linhas)
+- Adicionar useMemo para totais (~15 linhas)
+- Adicionar legendas (~25 linhas)
+
+Nenhuma alteração no banco de dados ou edge functions necessária.
 
