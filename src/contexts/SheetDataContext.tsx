@@ -983,28 +983,17 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       ];
     }
 
-    // DEDUPLICATION: Use Set to track unique Venda # + Item combinations
-    const processedKeys = new Set<string>();
-    const uniqueData: typeof filteredData = [];
+    // NOTE: NO deduplication - use all records as per ERP validation
+    // Faturamento and Lucro both EXCLUDE 'PC' (Pacote) type items
+    const nonPcData = filteredData.filter(r => r.Tipo !== 'PC');
     
-    filteredData.forEach(row => {
-      const dedupeKey = `${row['Venda #']}|${row.Item}`;
-      if (processedKeys.has(dedupeKey)) return;
-      processedKeys.add(dedupeKey);
-      uniqueData.push(row);
-    });
-
-    // Aggregate data with deduplication applied
-    // - Faturamento: excludes 'PC' (Pacote) type items
-    // - Lucro: includes ALL items including PC
-    // - Vendas: unique venda IDs (excluding PC items for counting)
-    const vendaIds = new Set(uniqueData.filter(r => r.Tipo !== 'PC').map(r => r['Venda #']));
+    // Vendas: unique venda IDs (excluding PC items for counting)
+    const vendaIds = new Set(nonPcData.map(r => r['Venda #']));
     const totalVendas = vendaIds.size;
-    const revenueData = uniqueData.filter(r => r.Tipo !== 'PC');
-    const totalFaturamento = revenueData.reduce((sum, r) => sum + (r.Líquido || 0), 0);
-    // IMPORTANT: Lucro includes ALL items including PC types
-    const totalLucro = uniqueData.reduce((sum, r) => sum + (r.Lucro || 0), 0);
-    const totalQuantidade = uniqueData.reduce((sum, r) => sum + (r.Quantidade || 0), 0);
+    const totalFaturamento = nonPcData.reduce((sum, r) => sum + (r.Líquido || 0), 0);
+    // CORRECTED: Lucro also EXCLUDES PC types (validated against ERP)
+    const totalLucro = nonPcData.reduce((sum, r) => sum + (r.Lucro || 0), 0);
+    const totalQuantidade = nonPcData.reduce((sum, r) => sum + (r.Quantidade || 0), 0);
     const ticketMedio = totalVendas > 0 ? totalFaturamento / totalVendas : 0;
     const lucroPercent = totalFaturamento > 0 ? (totalLucro / totalFaturamento) * 100 : 0;
     const pa = totalVendas > 0 ? totalQuantidade / totalVendas : 0;

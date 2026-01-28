@@ -1,20 +1,41 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Trophy, Package, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRankingCache, RankingColaborador } from '@/hooks/useRankingCache';
 import { Skeleton } from '@/components/ui/skeleton';
+import { RawSaleRow } from '@/contexts/SheetDataContext';
 
 interface RankingCardProps {
   year: number;
   month: number;
   filialId?: string;
+  rawData?: RawSaleRow[];
 }
 
 const colors = ['bg-primary', 'bg-success', 'bg-warning', 'bg-chart-4', 'bg-chart-5', 'bg-primary/80', 'bg-success/80', 'bg-warning/80'];
 
-export function RankingCard({ year, month, filialId = 'todas' }: RankingCardProps) {
+// Helper to get top 3 products for a collaborator
+const getTop3Produtos = (rawData: RawSaleRow[] | undefined, colaboradorNome: string): { nome: string; quantidade: number }[] => {
+  if (!rawData || rawData.length === 0) return [];
+  
+  const produtoMap = new Map<string, number>();
+  
+  rawData
+    .filter(r => r.Emissor === colaboradorNome && r.Tipo !== 'PC')
+    .forEach(r => {
+      const produto = r.Item || 'Desconhecido';
+      produtoMap.set(produto, (produtoMap.get(produto) || 0) + (r.Quantidade || 1));
+    });
+  
+  return Array.from(produtoMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([nome, quantidade]) => ({ nome, quantidade }));
+};
+
+export function RankingCard({ year, month, filialId = 'todas', rawData }: RankingCardProps) {
   const { fetchRankingColaboradores, isLoading } = useRankingCache();
   const [colaboradores, setColaboradores] = useState<RankingColaborador[]>([]);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -104,6 +125,22 @@ export function RankingCard({ year, month, filialId = 'todas' }: RankingCardProp
                       <span>{colaborador.conversao}</span>
                     </div>
                   </div>
+                  
+                  {/* Top 3 Products */}
+                  {rawData && rawData.length > 0 && (
+                    <div className="border-t pt-2 mt-2">
+                      <p className="text-xs font-medium mb-1.5 text-muted-foreground">Top 3 Produtos Vendidos:</p>
+                      {getTop3Produtos(rawData, colaborador.nome).map((p, i) => (
+                        <p key={i} className="text-xs flex justify-between">
+                          <span>{i + 1}. {p.nome.length > 25 ? p.nome.substring(0, 25) + '...' : p.nome}</span>
+                          <span className="font-medium">{p.quantidade} un.</span>
+                        </p>
+                      ))}
+                      {getTop3Produtos(rawData, colaborador.nome).length === 0 && (
+                        <p className="text-xs text-muted-foreground">Nenhum produto encontrado</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </HoverCardContent>
             </HoverCard>

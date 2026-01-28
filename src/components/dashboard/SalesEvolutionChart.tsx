@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, DollarSign, BarChart3 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 
 interface ChartConfig {
@@ -182,7 +182,7 @@ export function SalesEvolutionChart({
   
   // Data states
   const [yearlyAggregates, setYearlyAggregates] = useState<MonthlyAggregate[]>([]);
-  const [dailyData, setDailyData] = useState<{ dia: string; faturamento: number }[]>([]);
+  const [dailyData, setDailyData] = useState<{ dia: string; faturamento: number; lucro: number }[]>([]);
   const [isLoadingDaily, setIsLoadingDaily] = useState(false);
   
   // Track loaded years to avoid duplicate calls
@@ -284,7 +284,7 @@ export function SalesEvolutionChart({
       }
 
       const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
-      const dailyFaturamento: { [day: number]: number } = {};
+      const dailyTotals: { [day: number]: { faturamento: number; lucro: number } } = {};
       
       filtered.forEach(row => {
         const rowDate = parseRowDate(row['Data Venda']);
@@ -293,14 +293,17 @@ export function SalesEvolutionChart({
         if (rowDate.getFullYear() === selectedYear && rowDate.getMonth() === selectedMonth) {
           const day = rowDate.getDate();
           if (row.Tipo !== 'PC') {
-            dailyFaturamento[day] = (dailyFaturamento[day] || 0) + (row.Líquido || 0);
+            if (!dailyTotals[day]) dailyTotals[day] = { faturamento: 0, lucro: 0 };
+            dailyTotals[day].faturamento += (row.Líquido || 0);
+            dailyTotals[day].lucro += (row.Lucro || 0);
           }
         }
       });
 
       setDailyData(Array.from({ length: daysInMonth }, (_, i) => ({
         dia: String(i + 1).padStart(2, '0'),
-        faturamento: Math.round(dailyFaturamento[i + 1] || 0),
+        faturamento: Math.round(dailyTotals[i + 1]?.faturamento || 0),
+        lucro: Math.round(dailyTotals[i + 1]?.lucro || 0),
       })));
       
       console.log(`[SalesEvolution] Daily data from raw cache: ${filtered.length} records`);
@@ -551,7 +554,8 @@ export function SalesEvolutionChart({
                 {/* Annual Totals */}
                 <div className="mt-3 pt-3 border-t space-y-1.5">
                   <div className="flex items-center gap-2 text-sm">
-                    <span className="text-muted-foreground">💰 Faturamento Anual:</span>
+                    <DollarSign className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">Faturamento Anual:</span>
                     <span className="font-medium">{formatCurrencyFull(annualTotals.faturamento)}</span>
                     <span className="text-xs text-muted-foreground">
                       ({previousYear}: {formatCurrencyFull(annualTotals.faturamentoAnterior)})
@@ -564,7 +568,8 @@ export function SalesEvolutionChart({
                     )}
                   </div>
                   <div className="flex items-center gap-2 text-sm">
-                    <span className="text-muted-foreground">📊 Lucro Anual:</span>
+                    <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">Lucro Anual:</span>
                     <span className="font-medium">{formatCurrencyFull(annualTotals.lucro)}</span>
                     <span className="text-xs text-muted-foreground">
                       ({previousYear}: {formatCurrencyFull(annualTotals.lucroAnterior)})
@@ -653,9 +658,9 @@ export function SalesEvolutionChart({
                       formatter={(value: number) => formatCurrencyFull(value)}
                     />
                     <Bar 
-                      dataKey="faturamento" 
+                      dataKey={viewMode === 'lucro' ? 'lucro' : 'faturamento'} 
                       name={`${mesesCompletos[selectedMonth]}/${selectedYear}`}
-                      fill="hsl(var(--primary))" 
+                      fill={viewMode === 'lucro' ? 'hsl(var(--success))' : 'hsl(var(--primary))'} 
                       radius={[4, 4, 0, 0]}
                     />
                   </BarChart>

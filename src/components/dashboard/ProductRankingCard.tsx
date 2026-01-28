@@ -1,18 +1,39 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
-import { Package, Info } from 'lucide-react';
+import { Package, Info, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRankingCache, RankingProduto } from '@/hooks/useRankingCache';
 import { Skeleton } from '@/components/ui/skeleton';
+import { RawSaleRow } from '@/contexts/SheetDataContext';
 
 interface ProductRankingCardProps {
   year: number;
   month: number;
   filialId?: string;
+  rawData?: RawSaleRow[];
 }
 
-export function ProductRankingCard({ year, month, filialId = 'todas' }: ProductRankingCardProps) {
+// Helper to get top 3 sellers for a product
+const getTop3Vendedores = (rawData: RawSaleRow[] | undefined, produtoNome: string): { nome: string; quantidade: number }[] => {
+  if (!rawData || rawData.length === 0) return [];
+  
+  const vendedorMap = new Map<string, number>();
+  
+  rawData
+    .filter(r => r.Item === produtoNome && r.Tipo !== 'PC')
+    .forEach(r => {
+      const vendedor = r.Emissor || 'Desconhecido';
+      vendedorMap.set(vendedor, (vendedorMap.get(vendedor) || 0) + (r.Quantidade || 1));
+    });
+  
+  return Array.from(vendedorMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([nome, quantidade]) => ({ nome, quantidade }));
+};
+
+export function ProductRankingCard({ year, month, filialId = 'todas', rawData }: ProductRankingCardProps) {
   const { fetchRankingProdutos, isLoading } = useRankingCache();
   const [produtos, setProdutos] = useState<RankingProduto[]>([]);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -92,6 +113,25 @@ export function ProductRankingCard({ year, month, filialId = 'todas' }: ProductR
                       <span>#{index + 1}</span>
                     </div>
                   </div>
+                  
+                  {/* Top 3 Sellers */}
+                  {rawData && rawData.length > 0 && (
+                    <div className="border-t pt-2 mt-2">
+                      <p className="text-xs font-medium mb-1.5 text-muted-foreground flex items-center gap-1">
+                        <Users className="h-3 w-3" />
+                        Top 3 Vendedores:
+                      </p>
+                      {getTop3Vendedores(rawData, produto.nome).map((v, i) => (
+                        <p key={i} className="text-xs flex justify-between">
+                          <span>{i + 1}. {v.nome.length > 20 ? v.nome.substring(0, 20) + '...' : v.nome}</span>
+                          <span className="font-medium">{v.quantidade} un.</span>
+                        </p>
+                      ))}
+                      {getTop3Vendedores(rawData, produto.nome).length === 0 && (
+                        <p className="text-xs text-muted-foreground">Nenhum vendedor encontrado</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </HoverCardContent>
             </HoverCard>
