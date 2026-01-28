@@ -128,6 +128,7 @@ export type Database = {
           id: string
           month: number
           quantidade_vendas: number
+          total_lucro: number | null
           updated_at: string
           year: number
         }
@@ -139,6 +140,7 @@ export type Database = {
           id?: string
           month: number
           quantidade_vendas?: number
+          total_lucro?: number | null
           updated_at?: string
           year: number
         }
@@ -150,6 +152,7 @@ export type Database = {
           id?: string
           month?: number
           quantidade_vendas?: number
+          total_lucro?: number | null
           updated_at?: string
           year?: number
         }
