@@ -10,6 +10,7 @@ export interface MonthlyAggregate {
   filial: string;
   colaborador: string | null;
   faturamento: number;
+  lucro: number;
   quantidade_vendas: number;
 }
 
@@ -17,6 +18,8 @@ export interface ChartDataPoint {
   mes: string;
   faturamento: number;
   faturamentoAnterior: number;
+  lucro: number;
+  lucroAnterior: number;
 }
 
 const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
@@ -39,7 +42,7 @@ export function useChartAggregates() {
     try {
       let query = supabase
         .from('erp_monthly_aggregates')
-        .select('year, month, filial, colaborador, faturamento, quantidade_vendas')
+        .select('year, month, filial, colaborador, faturamento, total_lucro, quantidade_vendas')
         .in('year', years)
         .order('year', { ascending: true })
         .order('month', { ascending: true });
@@ -74,6 +77,7 @@ export function useChartAggregates() {
         filial: row.filial,
         colaborador: row.colaborador,
         faturamento: Number(row.faturamento),
+        lucro: Number((row as any).total_lucro || 0),
         quantidade_vendas: row.quantidade_vendas,
       }));
 
@@ -98,19 +102,21 @@ export function useChartAggregates() {
       const month = index + 1;
       
       // Sum all matching aggregates for current year
-      const currentYearData = aggregateData
-        .filter(a => a.year === currentYear && a.month === month)
-        .reduce((sum, a) => sum + a.faturamento, 0);
+      const currentYearAggregates = aggregateData.filter(a => a.year === currentYear && a.month === month);
+      const currentYearFaturamento = currentYearAggregates.reduce((sum, a) => sum + a.faturamento, 0);
+      const currentYearLucro = currentYearAggregates.reduce((sum, a) => sum + a.lucro, 0);
       
       // Sum all matching aggregates for previous year
-      const previousYearData = aggregateData
-        .filter(a => a.year === previousYear && a.month === month)
-        .reduce((sum, a) => sum + a.faturamento, 0);
+      const previousYearAggregates = aggregateData.filter(a => a.year === previousYear && a.month === month);
+      const previousYearFaturamento = previousYearAggregates.reduce((sum, a) => sum + a.faturamento, 0);
+      const previousYearLucro = previousYearAggregates.reduce((sum, a) => sum + a.lucro, 0);
       
       return {
         mes,
-        faturamento: Math.round(currentYearData),
-        faturamentoAnterior: Math.round(previousYearData),
+        faturamento: Math.round(currentYearFaturamento),
+        faturamentoAnterior: Math.round(previousYearFaturamento),
+        lucro: Math.round(currentYearLucro),
+        lucroAnterior: Math.round(previousYearLucro),
       };
     });
   }, []);

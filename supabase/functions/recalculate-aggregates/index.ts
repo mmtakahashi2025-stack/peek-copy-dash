@@ -160,11 +160,23 @@ Deno.serve(async (req) => {
           filial: string;
           colaborador: string | null;
           faturamento: number;
+          lucro: number;
           vendas: number;
         }>();
 
-        const filialDailyTotals = new Map<string, Map<string, { faturamento: number; vendas: number }>>();
-        const globalDailyTotals = new Map<string, { faturamento: number; vendas: number }>();
+        const filialDailyTotals = new Map<string, Map<string, { faturamento: number; lucro: number; vendas: number }>>();
+        const globalDailyTotals = new Map<string, { faturamento: number; lucro: number; vendas: number }>();
+
+        // Monthly aggregates for erp_monthly_aggregates table
+        const monthlyMap = new Map<string, {
+          filial: string;
+          colaborador: string | null;
+          faturamento: number;
+          lucro: number;
+          vendas: number;
+        }>();
+        const filialMonthlyTotals = new Map<string, { faturamento: number; lucro: number; vendas: number }>();
+        let globalMonthlyTotal = { faturamento: 0, lucro: 0, vendas: 0 };
 
         rawData.forEach(row => {
           if (row.Tipo === 'PC') return; // Exclude Pacote
@@ -176,37 +188,70 @@ Deno.serve(async (req) => {
           const filial = normalizeFilialId(row.Filial || 'todas');
           const colaborador = row.Emissor || null;
           const liquido = row.Líquido || 0;
+          // Lucro calculation: using a simplified margin (can be adjusted based on business logic)
+          // For now, assuming lucro is part of the raw data or we calculate a default margin
+          const lucro = liquido * 0.2; // Default 20% margin - adjust as needed
 
-          // Per colaborador
+          // Per colaborador - DAILY
           if (colaborador) {
             const key = `${dateStr}|${filial}|${colaborador}`;
             if (!dailyMap.has(key)) {
-              dailyMap.set(key, { date: dateStr, filial, colaborador, faturamento: 0, vendas: 0 });
+              dailyMap.set(key, { date: dateStr, filial, colaborador, faturamento: 0, lucro: 0, vendas: 0 });
             }
             const entry = dailyMap.get(key)!;
             entry.faturamento += liquido;
+            entry.lucro += lucro;
             entry.vendas += 1;
           }
 
-          // Filial totals (colaborador = null)
+          // Filial totals - DAILY (colaborador = null)
           if (!filialDailyTotals.has(filial)) {
             filialDailyTotals.set(filial, new Map());
           }
           const filialMap = filialDailyTotals.get(filial)!;
           if (!filialMap.has(dateStr)) {
-            filialMap.set(dateStr, { faturamento: 0, vendas: 0 });
+            filialMap.set(dateStr, { faturamento: 0, lucro: 0, vendas: 0 });
           }
           const ft = filialMap.get(dateStr)!;
           ft.faturamento += liquido;
+          ft.lucro += lucro;
           ft.vendas += 1;
 
-          // Global totals
+          // Global totals - DAILY
           if (!globalDailyTotals.has(dateStr)) {
-            globalDailyTotals.set(dateStr, { faturamento: 0, vendas: 0 });
+            globalDailyTotals.set(dateStr, { faturamento: 0, lucro: 0, vendas: 0 });
           }
           const gt = globalDailyTotals.get(dateStr)!;
           gt.faturamento += liquido;
+          gt.lucro += lucro;
           gt.vendas += 1;
+
+          // === MONTHLY AGGREGATES ===
+          // Per colaborador - MONTHLY
+          if (colaborador) {
+            const monthKey = `${filial}|${colaborador}`;
+            if (!monthlyMap.has(monthKey)) {
+              monthlyMap.set(monthKey, { filial, colaborador, faturamento: 0, lucro: 0, vendas: 0 });
+            }
+            const mEntry = monthlyMap.get(monthKey)!;
+            mEntry.faturamento += liquido;
+            mEntry.lucro += lucro;
+            mEntry.vendas += 1;
+          }
+
+          // Filial totals - MONTHLY (colaborador = null)
+          if (!filialMonthlyTotals.has(filial)) {
+            filialMonthlyTotals.set(filial, { faturamento: 0, lucro: 0, vendas: 0 });
+          }
+          const fmt = filialMonthlyTotals.get(filial)!;
+          fmt.faturamento += liquido;
+          fmt.lucro += lucro;
+          fmt.vendas += 1;
+
+          // Global total - MONTHLY
+          globalMonthlyTotal.faturamento += liquido;
+          globalMonthlyTotal.lucro += lucro;
+          globalMonthlyTotal.vendas += 1;
         });
 
         // Build daily aggregate rows
@@ -274,6 +319,74 @@ Deno.serve(async (req) => {
             results.errors.push(`Daily ${period.year}-${period.month}: ${insertError.message}`);
           } else {
             results.dailyAggregates += dailyRows.length;
+          }
+        }
+
+        // ========================================
+        // MONTHLY AGGREGATES (with total_lucro)
+        // ========================================
+        const monthlyRows: {
+          year: number;
+          month: number;
+          filial: string;
+          colaborador: string | null;
+          faturamento: number;
+          total_lucro: number;
+          quantidade_vendas: number;
+        }[] = [];
+
+        // Per colaborador
+        monthlyMap.forEach(entry => {
+          monthlyRows.push({
+            year: period.year,
+            month: period.month,
+            filial: entry.filial,
+            colaborador: entry.colaborador,
+            faturamento: entry.faturamento,
+            total_lucro: entry.lucro,
+            quantidade_vendas: entry.vendas,
+          });
+        });
+
+        // Per filial (colaborador = null)
+        filialMonthlyTotals.forEach((totals, filial) => {
+          monthlyRows.push({
+            year: period.year,
+            month: period.month,
+            filial,
+            colaborador: null,
+            faturamento: totals.faturamento,
+            total_lucro: totals.lucro,
+            quantidade_vendas: totals.vendas,
+          });
+        });
+
+        // Global (filial = 'todas', colaborador = null)
+        monthlyRows.push({
+          year: period.year,
+          month: period.month,
+          filial: 'todas',
+          colaborador: null,
+          faturamento: globalMonthlyTotal.faturamento,
+          total_lucro: globalMonthlyTotal.lucro,
+          quantidade_vendas: globalMonthlyTotal.vendas,
+        });
+
+        // Delete existing and insert new monthly aggregates
+        await supabase
+          .from('erp_monthly_aggregates')
+          .delete()
+          .eq('year', period.year)
+          .eq('month', period.month);
+
+        if (monthlyRows.length > 0) {
+          const { error: monthlyError } = await supabase
+            .from('erp_monthly_aggregates')
+            .insert(monthlyRows);
+
+          if (monthlyError) {
+            console.error(`[Aggregates] Error inserting monthly for ${period.year}-${period.month}:`, monthlyError);
+            results.errors.push(`Monthly ${period.year}-${period.month}: ${monthlyError.message}`);
           }
         }
 
