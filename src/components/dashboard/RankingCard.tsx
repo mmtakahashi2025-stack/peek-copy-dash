@@ -1,20 +1,32 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
-import { Trophy, Package, Loader2 } from 'lucide-react';
+import { Trophy, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useRankingCache, RankingColaborador } from '@/hooks/useRankingCache';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RawSaleRow } from '@/contexts/SheetDataContext';
 
 interface RankingCardProps {
-  year: number;
-  month: number;
-  filialId?: string;
   rawData?: RawSaleRow[];
+  filialId?: string;
 }
 
 const colors = ['bg-primary', 'bg-success', 'bg-warning', 'bg-chart-4', 'bg-chart-5', 'bg-primary/80', 'bg-success/80', 'bg-warning/80'];
+
+// Helper functions
+function getInitials(name: string): string {
+  return name.split(' ').map(n => n[0]).filter(Boolean).join('').substring(0, 2).toUpperCase();
+}
+
+function formatCurrency(value: number): string {
+  if (value >= 1000000) return `R$ ${(value / 1000000).toFixed(1)}M`;
+  if (value >= 1000) return `R$ ${(value / 1000).toFixed(0)}K`;
+  return `R$ ${value.toFixed(2)}`;
+}
+
+function normalizeFilial(filial: string): string {
+  return filial?.toLowerCase().replace(/\s+/g, '-').normalize('NFD').replace(/[\u0300-\u036f]/g, '') || 'todas';
+}
 
 // Helper to get top 3 products for a collaborator
 const getTop3Produtos = (rawData: RawSaleRow[] | undefined, colaboradorNome: string): { nome: string; quantidade: number }[] => {
@@ -35,30 +47,47 @@ const getTop3Produtos = (rawData: RawSaleRow[] | undefined, colaboradorNome: str
     .map(([nome, quantidade]) => ({ nome, quantidade }));
 };
 
-export function RankingCard({ year, month, filialId = 'todas', rawData }: RankingCardProps) {
-  const { fetchRankingColaboradores, isLoading } = useRankingCache();
-  const [colaboradores, setColaboradores] = useState<RankingColaborador[]>([]);
-  const [hasLoaded, setHasLoaded] = useState(false);
+export function RankingCard({ rawData, filialId = 'todas' }: RankingCardProps) {
+  // Calculate ranking directly from rawData
+  const colaboradores = useMemo(() => {
+    if (!rawData || rawData.length === 0) return [];
+    
+    // Filter by type and filial
+    let filteredData = rawData.filter(r => r.Tipo !== 'PC');
+    if (filialId && filialId !== 'todas') {
+      filteredData = filteredData.filter(r => 
+        normalizeFilial(r.Filial) === filialId
+      );
+    }
+    
+    // Group by collaborator
+    const colaboradorMap = new Map<string, { faturamento: number; vendas: Set<number> }>();
+    
+    filteredData.forEach(r => {
+      const nome = r.Emissor || 'Desconhecido';
+      const current = colaboradorMap.get(nome) || { faturamento: 0, vendas: new Set() };
+      current.faturamento += r.Líquido || 0;
+      if (r['Venda #']) current.vendas.add(r['Venda #']);
+      colaboradorMap.set(nome, current);
+    });
+    
+    // Convert to array, sort by revenue, and take top 10
+    return Array.from(colaboradorMap.entries())
+      .map(([nome, data]) => ({
+        nome,
+        iniciais: getInitials(nome),
+        vendas: data.vendas.size,
+        faturamento: data.faturamento,
+        faturamentoFormatado: formatCurrency(data.faturamento),
+        conversao: '--',
+      }))
+      .sort((a, b) => b.faturamento - a.faturamento)
+      .slice(0, 10);
+  }, [rawData, filialId]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const hasData = rawData && rawData.length > 0;
 
-    const loadRanking = async () => {
-      const data = await fetchRankingColaboradores(year, month, filialId);
-      if (!cancelled) {
-        setColaboradores(data);
-        setHasLoaded(true);
-      }
-    };
-
-    loadRanking();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [year, month, filialId, fetchRankingColaboradores]);
-
-  if (isLoading && !hasLoaded) {
+  if (!hasData) {
     return <RankingCardSkeleton />;
   }
 
@@ -145,7 +174,7 @@ export function RankingCard({ year, month, filialId = 'todas', rawData }: Rankin
               </HoverCardContent>
             </HoverCard>
           ))}
-          {colaboradores.length === 0 && hasLoaded && (
+          {colaboradores.length === 0 && (
             <div className="px-6 py-4 text-center text-muted-foreground">
               Nenhum colaborador encontrado
             </div>
