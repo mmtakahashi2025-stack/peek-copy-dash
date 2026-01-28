@@ -14,6 +14,7 @@ interface RawSaleRow {
   Tipo: string;
   Quantidade: number;
   Líquido: number;
+  Lucro: number;
 }
 
 function normalizeFilialId(filial: string): string {
@@ -190,7 +191,7 @@ Deno.serve(async (req) => {
           const liquido = row.Líquido || 0;
           // Lucro calculation: using a simplified margin (can be adjusted based on business logic)
           // For now, assuming lucro is part of the raw data or we calculate a default margin
-          const lucro = liquido * 0.2; // Default 20% margin - adjust as needed
+          const lucro = row.Lucro || 0; // Usar lucro real do ERP
 
           // Per colaborador - DAILY
           if (colaborador) {
