@@ -56,69 +56,50 @@ const formatCurrencyFull = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 };
 
-// Custom tooltip content for annual comparison with trend indicators and lucro
-const AnnualTooltipContent = ({ active, payload, label }: any) => {
-  if (!active || !payload || payload.length < 2) return null;
+// Custom tooltip content for annual comparison - shows only selected metric
+const AnnualTooltipContent = ({ active, payload, label, viewMode }: any) => {
+  if (!active || !payload || payload.length === 0) return null;
   
-  const faturamento = payload.find((p: any) => p.dataKey === 'faturamento')?.value || 0;
-  const faturamentoAnterior = payload.find((p: any) => p.dataKey === 'faturamentoAnterior')?.value || 0;
-  const lucro = payload.find((p: any) => p.dataKey === 'lucro')?.value || 0;
-  const lucroAnterior = payload.find((p: any) => p.dataKey === 'lucroAnterior')?.value || 0;
+  // Access full data point to get all metrics regardless of rendered bars
+  const dataPoint = payload[0]?.payload;
+  if (!dataPoint) return null;
   
-  const variacaoFaturamento = faturamentoAnterior > 0 ? ((faturamento - faturamentoAnterior) / faturamentoAnterior) * 100 : 0;
-  const variacaoLucro = lucroAnterior > 0 ? ((lucro - lucroAnterior) / lucroAnterior) * 100 : 0;
-  
-  const isGrowthFat = faturamento > faturamentoAnterior;
-  const isDeclineFat = faturamento < faturamentoAnterior;
-  const isGrowthLucro = lucro > lucroAnterior;
-  const isDeclineLucro = lucro < lucroAnterior;
+  const isLucro = viewMode === 'lucro';
+  const atual = isLucro ? dataPoint.lucro : dataPoint.faturamento;
+  const anterior = isLucro ? dataPoint.lucroAnterior : dataPoint.faturamentoAnterior;
+  const variacao = anterior > 0 ? ((atual - anterior) / anterior) * 100 : 0;
+  const isGrowth = atual > anterior;
+  const isDecline = atual < anterior;
   
   return (
     <div className="bg-background border border-border/50 rounded-lg p-2.5 shadow-xl text-xs min-w-[180px]">
       <p className="font-medium mb-2 border-b pb-1">{label}</p>
       
-      {/* Faturamento */}
+      {/* Metric based on viewMode */}
       <div className="mb-2">
-        <span className="text-muted-foreground text-[10px] uppercase tracking-wide">Faturamento</span>
+        <span className="text-muted-foreground text-[10px] uppercase tracking-wide">
+          {isLucro ? 'Lucro' : 'Faturamento'}
+        </span>
         <div className="flex items-center gap-1.5 mt-0.5">
-          {isGrowthFat && <TrendingUp className="h-3 w-3 text-success" />}
-          {isDeclineFat && <TrendingDown className="h-3 w-3 text-destructive" />}
-          {!isGrowthFat && !isDeclineFat && <Minus className="h-3 w-3 text-muted-foreground" />}
-          <span className={`font-medium ${isGrowthFat ? 'text-success' : isDeclineFat ? 'text-destructive' : 'text-foreground'}`}>
-            {formatCurrencyFull(faturamento)}
+          {isGrowth && <TrendingUp className="h-3 w-3 text-success" />}
+          {isDecline && <TrendingDown className="h-3 w-3 text-destructive" />}
+          {!isGrowth && !isDecline && <Minus className="h-3 w-3 text-muted-foreground" />}
+          <span className={`font-medium ${isGrowth ? 'text-success' : isDecline ? 'text-destructive' : 'text-foreground'}`}>
+            {formatCurrencyFull(atual)}
           </span>
-          {faturamentoAnterior > 0 && (
-            <span className={`text-[10px] ${isGrowthFat ? 'text-success' : isDeclineFat ? 'text-destructive' : 'text-muted-foreground'}`}>
-              ({isGrowthFat ? '+' : ''}{variacaoFaturamento.toFixed(1)}%)
+          {anterior > 0 && (
+            <span className={`text-[10px] ${isGrowth ? 'text-success' : isDecline ? 'text-destructive' : 'text-muted-foreground'}`}>
+              ({isGrowth ? '+' : ''}{variacao.toFixed(1)}%)
             </span>
           )}
         </div>
       </div>
       
-      {/* Lucro */}
-      <div className="mb-2">
-        <span className="text-muted-foreground text-[10px] uppercase tracking-wide">Lucro</span>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          {isGrowthLucro && <TrendingUp className="h-3 w-3 text-success" />}
-          {isDeclineLucro && <TrendingDown className="h-3 w-3 text-destructive" />}
-          {!isGrowthLucro && !isDeclineLucro && <Minus className="h-3 w-3 text-muted-foreground" />}
-          <span className={`font-medium ${isGrowthLucro ? 'text-success' : isDeclineLucro ? 'text-destructive' : 'text-foreground'}`}>
-            {formatCurrencyFull(lucro)}
-          </span>
-          {lucroAnterior > 0 && (
-            <span className={`text-[10px] ${isGrowthLucro ? 'text-success' : isDeclineLucro ? 'text-destructive' : 'text-muted-foreground'}`}>
-              ({isGrowthLucro ? '+' : ''}{variacaoLucro.toFixed(1)}%)
-            </span>
-          )}
-        </div>
-      </div>
-      
-      {/* Ano anterior */}
+      {/* Previous year */}
       <div className="border-t pt-1.5 text-muted-foreground">
         <span className="text-[10px] uppercase tracking-wide">Ano anterior</span>
-        <div className="mt-0.5 space-y-0.5">
-          <div className="text-[11px]">Fat: {formatCurrencyFull(faturamentoAnterior)}</div>
-          <div className="text-[11px]">Lucro: {formatCurrencyFull(lucroAnterior)}</div>
+        <div className="mt-0.5">
+          <div className="text-[11px]">{formatCurrencyFull(anterior)}</div>
         </div>
       </div>
     </div>
@@ -375,6 +356,30 @@ export function SalesEvolutionChart({
     };
   }, [yearlyComparisonData, viewMode]);
 
+  // Calculate annual totals
+  const annualTotals = useMemo(() => {
+    const totalFaturamento = yearlyComparisonData.reduce((sum, d) => sum + d.faturamento, 0);
+    const totalFaturamentoAnterior = yearlyComparisonData.reduce((sum, d) => sum + d.faturamentoAnterior, 0);
+    const totalLucro = yearlyComparisonData.reduce((sum, d) => sum + d.lucro, 0);
+    const totalLucroAnterior = yearlyComparisonData.reduce((sum, d) => sum + d.lucroAnterior, 0);
+    
+    const variacaoFat = totalFaturamentoAnterior > 0 
+      ? ((totalFaturamento - totalFaturamentoAnterior) / totalFaturamentoAnterior) * 100 
+      : 0;
+    const variacaoLucro = totalLucroAnterior > 0 
+      ? ((totalLucro - totalLucroAnterior) / totalLucroAnterior) * 100 
+      : 0;
+    
+    return {
+      faturamento: totalFaturamento,
+      faturamentoAnterior: totalFaturamentoAnterior,
+      lucro: totalLucro,
+      lucroAnterior: totalLucroAnterior,
+      variacaoFat,
+      variacaoLucro,
+    };
+  }, [yearlyComparisonData]);
+
   const hasYearlyData = yearlyComparisonData.some(d => d.faturamento > 0 || d.faturamentoAnterior > 0);
   const hasPreviousYearData = yearlyComparisonData.some(d => d.faturamentoAnterior > 0);
   const hasDailyData = dailyData.some(d => d.faturamento > 0);
@@ -492,7 +497,7 @@ export function SalesEvolutionChart({
                       axisLine={false}
                       width={60}
                     />
-                    <ChartTooltip content={<AnnualTooltipContent />} />
+                    <ChartTooltip content={<AnnualTooltipContent viewMode={viewMode} />} />
                     <Bar 
                       dataKey={previousDataKey} 
                       name={`${previousYear}`}
@@ -541,6 +546,36 @@ export function SalesEvolutionChart({
                       ({bestAndWorstMonth.worstVariacao > 0 ? '+' : ''}{bestAndWorstMonth.worstVariacao.toFixed(1)}%)
                     </span>
                   )}
+                </div>
+                
+                {/* Annual Totals */}
+                <div className="mt-3 pt-3 border-t space-y-1.5">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground">💰 Faturamento Anual:</span>
+                    <span className="font-medium">{formatCurrencyFull(annualTotals.faturamento)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      ({previousYear}: {formatCurrencyFull(annualTotals.faturamentoAnterior)})
+                    </span>
+                    {annualTotals.variacaoFat !== 0 && (
+                      <span className={`text-xs flex items-center gap-0.5 ${annualTotals.variacaoFat > 0 ? 'text-success' : 'text-destructive'}`}>
+                        {annualTotals.variacaoFat > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                        {annualTotals.variacaoFat > 0 ? '+' : ''}{annualTotals.variacaoFat.toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground">📊 Lucro Anual:</span>
+                    <span className="font-medium">{formatCurrencyFull(annualTotals.lucro)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      ({previousYear}: {formatCurrencyFull(annualTotals.lucroAnterior)})
+                    </span>
+                    {annualTotals.variacaoLucro !== 0 && (
+                      <span className={`text-xs flex items-center gap-0.5 ${annualTotals.variacaoLucro > 0 ? 'text-success' : 'text-destructive'}`}>
+                        {annualTotals.variacaoLucro > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                        {annualTotals.variacaoLucro > 0 ? '+' : ''}{annualTotals.variacaoLucro.toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
