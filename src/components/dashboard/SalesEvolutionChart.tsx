@@ -187,16 +187,14 @@ export function SalesEvolutionChart({
   
   // Track loaded years to avoid duplicate calls
   const loadedYearsRef = useRef<string>('');
-  const isInitialMountRef = useRef(true);
   
   // Sync internal state when dashboard filters change
   useEffect(() => {
-    if (dateFrom && !isInitialMountRef.current) {
+    if (dateFrom) {
       setSelectedMonth(dateFrom.getMonth());
       setSelectedYear(dateFrom.getFullYear());
       setSelectedYearForAnnual(dateFrom.getFullYear());
     }
-    isInitialMountRef.current = false;
   }, [dateFrom]);
   
   // Determine comparison year based on filter or default to previous year

@@ -65,12 +65,14 @@ export function useAggregateCalculator() {
         filial: string;
         colaborador: string | null;
         faturamento: number;
+        lucro: number;
         vendas: number;
       }>();
 
       const filialTotals = new Map<string, {
         filial: string;
         faturamento: number;
+        lucro: number;
         vendas: number;
       }>();
 
@@ -82,11 +84,12 @@ export function useAggregateCalculator() {
         filial: string;
         colaborador: string | null;
         faturamento: number;
+        lucro: number;
         vendas: number;
       }>();
 
-      const filialDailyTotals = new Map<string, Map<string, { faturamento: number; vendas: number }>>();
-      const globalDailyTotals = new Map<string, { faturamento: number; vendas: number }>();
+      const filialDailyTotals = new Map<string, Map<string, { faturamento: number; lucro: number; vendas: number }>>();
+      const globalDailyTotals = new Map<string, { faturamento: number; lucro: number; vendas: number }>();
 
       // ========================================
       // LEVEL 3: RANKING CACHE (new)
@@ -107,25 +110,28 @@ export function useAggregateCalculator() {
         const colaborador = row.Emissor || null;
         const produto = row.Item || 'Desconhecido';
         const liquido = row.Líquido || 0;
+        const lucroRow = row.Lucro || 0;
         const quantidade = row.Quantidade || 0;
 
         // MONTHLY: Per colaborador
         if (colaborador) {
           const key = `${filial}|${colaborador}`;
           if (!monthlyMap.has(key)) {
-            monthlyMap.set(key, { filial, colaborador, faturamento: 0, vendas: 0 });
+            monthlyMap.set(key, { filial, colaborador, faturamento: 0, lucro: 0, vendas: 0 });
           }
           const agg = monthlyMap.get(key)!;
           agg.faturamento += liquido;
+          agg.lucro += lucroRow;
           agg.vendas += 1;
         }
 
         // MONTHLY: Per filial total
         if (!filialTotals.has(filial)) {
-          filialTotals.set(filial, { filial, faturamento: 0, vendas: 0 });
+          filialTotals.set(filial, { filial, faturamento: 0, lucro: 0, vendas: 0 });
         }
         const ft = filialTotals.get(filial)!;
         ft.faturamento += liquido;
+        ft.lucro += lucroRow;
         ft.vendas += 1;
 
         // DAILY: Only if we have a valid date
@@ -134,10 +140,11 @@ export function useAggregateCalculator() {
           if (colaborador) {
             const key = `${dateStr}|${filial}|${colaborador}`;
             if (!dailyMap.has(key)) {
-              dailyMap.set(key, { date: dateStr, filial, colaborador, faturamento: 0, vendas: 0 });
+              dailyMap.set(key, { date: dateStr, filial, colaborador, faturamento: 0, lucro: 0, vendas: 0 });
             }
             const entry = dailyMap.get(key)!;
             entry.faturamento += liquido;
+            entry.lucro += lucroRow;
             entry.vendas += 1;
           }
 
@@ -147,18 +154,20 @@ export function useAggregateCalculator() {
           }
           const filialMap = filialDailyTotals.get(filial)!;
           if (!filialMap.has(dateStr)) {
-            filialMap.set(dateStr, { faturamento: 0, vendas: 0 });
+            filialMap.set(dateStr, { faturamento: 0, lucro: 0, vendas: 0 });
           }
           const fdt = filialMap.get(dateStr)!;
           fdt.faturamento += liquido;
+          fdt.lucro += lucroRow;
           fdt.vendas += 1;
 
           // Global daily totals
           if (!globalDailyTotals.has(dateStr)) {
-            globalDailyTotals.set(dateStr, { faturamento: 0, vendas: 0 });
+            globalDailyTotals.set(dateStr, { faturamento: 0, lucro: 0, vendas: 0 });
           }
           const gt = globalDailyTotals.get(dateStr)!;
           gt.faturamento += liquido;
+          gt.lucro += lucroRow;
           gt.vendas += 1;
         }
 
@@ -211,6 +220,7 @@ export function useAggregateCalculator() {
         filial: string;
         colaborador: string | null;
         faturamento: number;
+        total_lucro: number;
         quantidade_vendas: number;
         updated_at: string;
       }[] = [];
@@ -221,6 +231,7 @@ export function useAggregateCalculator() {
           filial: agg.filial,
           colaborador: agg.colaborador,
           faturamento: agg.faturamento,
+          total_lucro: agg.lucro,
           quantidade_vendas: agg.vendas,
           updated_at: new Date().toISOString(),
         });
@@ -232,20 +243,22 @@ export function useAggregateCalculator() {
           filial: ft.filial,
           colaborador: null,
           faturamento: ft.faturamento,
+          total_lucro: ft.lucro,
           quantidade_vendas: ft.vendas,
           updated_at: new Date().toISOString(),
         });
       });
 
       const globalTotal = Array.from(filialTotals.values()).reduce(
-        (acc, ft) => ({ faturamento: acc.faturamento + ft.faturamento, vendas: acc.vendas + ft.vendas }),
-        { faturamento: 0, vendas: 0 }
+        (acc, ft) => ({ faturamento: acc.faturamento + ft.faturamento, lucro: acc.lucro + ft.lucro, vendas: acc.vendas + ft.vendas }),
+        { faturamento: 0, lucro: 0, vendas: 0 }
       );
       monthlyRows.push({
         year, month,
         filial: 'todas',
         colaborador: null,
         faturamento: globalTotal.faturamento,
+        total_lucro: globalTotal.lucro,
         quantidade_vendas: globalTotal.vendas,
         updated_at: new Date().toISOString(),
       });
@@ -267,6 +280,7 @@ export function useAggregateCalculator() {
         filial: string;
         colaborador: string | null;
         faturamento: number;
+        total_lucro: number;
         quantidade_vendas: number;
       }[] = [];
 
@@ -276,6 +290,7 @@ export function useAggregateCalculator() {
           filial: entry.filial,
           colaborador: entry.colaborador,
           faturamento: entry.faturamento,
+          total_lucro: entry.lucro,
           quantidade_vendas: entry.vendas,
         });
       });
@@ -287,6 +302,7 @@ export function useAggregateCalculator() {
             filial,
             colaborador: null,
             faturamento: totals.faturamento,
+            total_lucro: totals.lucro,
             quantidade_vendas: totals.vendas,
           });
         });
@@ -298,6 +314,7 @@ export function useAggregateCalculator() {
           filial: 'todas',
           colaborador: null,
           faturamento: totals.faturamento,
+          total_lucro: totals.lucro,
           quantidade_vendas: totals.vendas,
         });
       });
