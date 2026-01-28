@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { Eye, EyeOff, Settings, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Eye, EyeOff, Settings, Loader2, CheckCircle, XCircle, RefreshCw, Wrench } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useSheetData } from '@/contexts/SheetDataContext';
@@ -25,6 +25,8 @@ export function SystemSettingsDialog({ triggerClassName }: SystemSettingsDialogP
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null);
+  const [isRecalculating, setIsRecalculating] = useState(false);
+  const [recalculateStatus, setRecalculateStatus] = useState<string | null>(null);
 
   // Load current credentials when dialog opens
   useEffect(() => {
@@ -84,6 +86,33 @@ export function SystemSettingsDialog({ triggerClassName }: SystemSettingsDialogP
       toast.error('Erro ao testar conexão');
     } finally {
       setIsTesting(false);
+    }
+  };
+
+  const handleRecalculateAggregates = async () => {
+    setIsRecalculating(true);
+    setRecalculateStatus('Iniciando recálculo...');
+    
+    try {
+      const response = await supabase.functions.invoke('recalculate-aggregates', {
+        body: { forceAll: true },
+      });
+
+      if (response.error) {
+        throw response.error;
+      }
+
+      const result = response.data;
+      setRecalculateStatus(
+        `✅ Concluído: ${result.processed} meses, ${result.dailyAggregates} agregados diários, ${result.rankingEntries} rankings`
+      );
+      toast.success('Agregados recalculados com sucesso!');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      setRecalculateStatus(`❌ Erro: ${errorMessage}`);
+      toast.error('Erro ao recalcular agregados');
+    } finally {
+      setIsRecalculating(false);
     }
   };
 
@@ -199,6 +228,46 @@ export function SystemSettingsDialog({ triggerClassName }: SystemSettingsDialogP
             <>
               <Separator className="my-4" />
               <LeadsImportSection />
+            </>
+          )}
+
+          {/* Data Maintenance Section - Admin Only */}
+          {canEdit && (
+            <>
+              <Separator className="my-4" />
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Wrench className="h-4 w-4 text-muted-foreground" />
+                  <h4 className="font-medium">Manutenção de Dados</h4>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Recalcular todos os agregados de performance. Útil após importação de dados ou correção de bugs.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRecalculateAggregates}
+                  disabled={isRecalculating}
+                  className="w-full"
+                >
+                  {isRecalculating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Processando...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Recalcular Agregados Históricos
+                    </>
+                  )}
+                </Button>
+                {recalculateStatus && (
+                  <p className="text-sm text-muted-foreground bg-muted/50 p-2 rounded">
+                    {recalculateStatus}
+                  </p>
+                )}
+              </div>
             </>
           )}
 
