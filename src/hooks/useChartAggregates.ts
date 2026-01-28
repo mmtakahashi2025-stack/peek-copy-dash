@@ -150,11 +150,15 @@ export function useChartAggregates() {
     }
 
     try {
+      // DEDUPLICATION: Use Set to track unique Venda # + Item combinations
+      const processedKeys = new Set<string>();
+
       // Group by filial + colaborador
       const aggregatesMap = new Map<string, {
         filial: string;
         colaborador: string | null;
         faturamento: number;
+        lucro: number;
         vendas: number;
       }>();
 
@@ -162,36 +166,48 @@ export function useChartAggregates() {
       const filialTotals = new Map<string, {
         filial: string;
         faturamento: number;
+        lucro: number;
         vendas: number;
       }>();
 
       data.forEach(row => {
-        // Exclude 'PC' (Pacote) type items from revenue calculation
-        if (row.Tipo === 'PC') return;
+        // DEDUPLICATION: Skip if already processed this Venda # + Item combination
+        const dedupeKey = `${row['Venda #']}|${row.Item}`;
+        if (processedKeys.has(dedupeKey)) return;
+        processedKeys.add(dedupeKey);
 
         const filial = row.Filial || 'todas';
         const colaborador = row.Emissor || null;
         const liquido = row.Líquido || 0;
+        const lucro = row.Lucro || 0;
+        
+        // IMPORTANT: Faturamento excludes PC types, Lucro includes ALL types
+        const isPC = row.Tipo === 'PC';
+        const faturamentoValue = isPC ? 0 : liquido;
 
         // Per colaborador aggregate
         if (colaborador) {
           const key = `${filial}|${colaborador}`;
           if (!aggregatesMap.has(key)) {
-            aggregatesMap.set(key, { filial, colaborador, faturamento: 0, vendas: 0 });
+            aggregatesMap.set(key, { filial, colaborador, faturamento: 0, lucro: 0, vendas: 0 });
           }
           const agg = aggregatesMap.get(key)!;
-          agg.faturamento += liquido;
-          agg.vendas += 1;
+          agg.faturamento += faturamentoValue;
+          agg.lucro += lucro;
+          if (!isPC) agg.vendas += 1;
         }
 
         // Per filial total (colaborador = null)
         if (!filialTotals.has(filial)) {
-          filialTotals.set(filial, { filial, faturamento: 0, vendas: 0 });
+          filialTotals.set(filial, { filial, faturamento: 0, lucro: 0, vendas: 0 });
         }
         const ft = filialTotals.get(filial)!;
-        ft.faturamento += liquido;
-        ft.vendas += 1;
+        ft.faturamento += faturamentoValue;
+        ft.lucro += lucro;
+        if (!isPC) ft.vendas += 1;
       });
+
+      console.log(`[Aggregates] Frontend: ${data.length} raw records, ${processedKeys.size} unique after dedup`);
 
       // Build rows for upsert
       const rows: {
@@ -200,6 +216,7 @@ export function useChartAggregates() {
         filial: string;
         colaborador: string | null;
         faturamento: number;
+        total_lucro: number;
         quantidade_vendas: number;
         updated_at: string;
       }[] = [];
@@ -212,6 +229,7 @@ export function useChartAggregates() {
           filial: agg.filial,
           colaborador: agg.colaborador,
           faturamento: agg.faturamento,
+          total_lucro: agg.lucro,
           quantidade_vendas: agg.vendas,
           updated_at: new Date().toISOString(),
         });
@@ -225,6 +243,7 @@ export function useChartAggregates() {
           filial: ft.filial,
           colaborador: null,
           faturamento: ft.faturamento,
+          total_lucro: ft.lucro,
           quantidade_vendas: ft.vendas,
           updated_at: new Date().toISOString(),
         });
@@ -232,8 +251,8 @@ export function useChartAggregates() {
 
       // Add global total (filial = 'todas', colaborador = null)
       const globalTotal = Array.from(filialTotals.values()).reduce(
-        (acc, ft) => ({ faturamento: acc.faturamento + ft.faturamento, vendas: acc.vendas + ft.vendas }),
-        { faturamento: 0, vendas: 0 }
+        (acc, ft) => ({ faturamento: acc.faturamento + ft.faturamento, lucro: acc.lucro + ft.lucro, vendas: acc.vendas + ft.vendas }),
+        { faturamento: 0, lucro: 0, vendas: 0 }
       );
       rows.push({
         year,
@@ -241,6 +260,7 @@ export function useChartAggregates() {
         filial: 'todas',
         colaborador: null,
         faturamento: globalTotal.faturamento,
+        total_lucro: globalTotal.lucro,
         quantidade_vendas: globalTotal.vendas,
         updated_at: new Date().toISOString(),
       });
