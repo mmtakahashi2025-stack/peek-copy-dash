@@ -236,6 +236,8 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   });
   const [cancelRequested, setCancelRequested] = useState(false);
   const loadInProgressRef = useRef(false);
+  // Stable ref for loadErpData to avoid useEffect re-triggers
+  const loadErpDataRef = useRef<(dateFrom?: Date, dateTo?: Date, forceRefresh?: boolean) => Promise<void>>();
 
   // Cancel loading function
   const cancelLoading = useCallback(() => {
@@ -879,13 +881,21 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     }
   }, [getCachedData, loadErpDataProgressive, loadErpDataSingle]);
 
+  // Keep ref always pointing to latest loadErpData
+  loadErpDataRef.current = loadErpData;
+
+  // Stable wrapper that never changes reference - prevents useEffect re-triggers
+  const stableLoadErpData = useCallback(async (dateFrom?: Date, dateTo?: Date, forceRefresh?: boolean) => {
+    return loadErpDataRef.current?.(dateFrom, dateTo, forceRefresh);
+  }, []);
+
   const refreshData = useCallback(async () => {
     if (currentPeriod) {
-      await loadErpData(currentPeriod.dateFrom, currentPeriod.dateTo, true);
+      await stableLoadErpData(currentPeriod.dateFrom, currentPeriod.dateTo, true);
     } else {
-      await loadErpData();
+      await stableLoadErpData();
     }
-  }, [currentPeriod, loadErpData]);
+  }, [currentPeriod, stableLoadErpData]);
 
   const testErpLogin = useCallback(async (): Promise<LoginTestResult> => {
     try {
@@ -1211,7 +1221,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       getColaboradores,
       getEvolucao,
       getProdutos,
-      loadErpData,
+      loadErpData: stableLoadErpData,
       loadYearlyData,
       cancelLoading,
       refreshData,
