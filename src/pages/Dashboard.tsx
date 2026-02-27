@@ -103,11 +103,16 @@ export default function Dashboard() {
     fetchKpis();
   }, [filters.filial, filters.dateFrom, filters.dateTo, getKpis, fetchExcellencePercentage, fetchLeadsTotal]);
 
-  // Reload data when date filters change (don't depend on isConnected to allow non-admin to load cache)
+  // Reload data when date filters change - debounced to prevent duplicate calls
+  // from rapid state changes (auth events, credential loads, etc.)
   useEffect(() => {
-    if (filters.dateFrom && filters.dateTo && erpCredentials?.hasPassword) {
+    if (!filters.dateFrom || !filters.dateTo || !erpCredentials?.hasPassword) return;
+    
+    const timer = setTimeout(() => {
       loadErpData(filters.dateFrom, filters.dateTo);
-    }
+    }, 300);
+    
+    return () => clearTimeout(timer);
   }, [filters.dateFrom, filters.dateTo, erpCredentials?.hasPassword, loadErpData]);
 
   // These are now fetched directly from cache in the ranking components
