@@ -58,19 +58,8 @@ export default function Dashboard() {
     setFilters(newFilters);
   }, []);
 
-  // Auto-load ERP data on mount if credentials are available and not already loaded
-  // Only admin can trigger API fetch; non-admin will only see cached data
-  useEffect(() => {
-    if (
-      !initialLoadDone && 
-      !isLoading && 
-      !isConnected && 
-      erpCredentials?.hasPassword
-    ) {
-      setInitialLoadDone(true);
-      loadErpData(filters.dateFrom, filters.dateTo);
-    }
-  }, [initialLoadDone, isLoading, isConnected, erpCredentials?.hasPassword, loadErpData, filters.dateFrom, filters.dateTo]);
+  // Single effect to load ERP data when date filters or credentials change
+  // Guards against concurrent calls with isLoading check
 
   // Fetch KPIs when filters change
   useEffect(() => {

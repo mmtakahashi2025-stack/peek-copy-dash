@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useErpCache } from '@/hooks/useErpCache';
@@ -235,6 +235,7 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
     isCancelled: false,
   });
   const [cancelRequested, setCancelRequested] = useState(false);
+  const loadInProgressRef = useRef(false);
 
   // Cancel loading function
   const cancelLoading = useCallback(() => {
@@ -814,6 +815,12 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
   }, [broadcastUpdate, setCachedData]);
 
   const loadErpData = useCallback(async (dateFrom?: Date, dateTo?: Date, forceRefresh = false) => {
+    // Prevent concurrent loads
+    if (loadInProgressRef.current) {
+      console.log('[ERP] Load already in progress, skipping duplicate call');
+      return;
+    }
+    
     const now = new Date();
     const startDate = dateFrom || new Date(now.getFullYear(), now.getMonth(), 1);
     const endDate = dateTo || now;
@@ -827,44 +834,48 @@ export function SheetDataProvider({ children }: { children: ReactNode }) {
       return;
     }
     
-    setIsLoading(true);
-    setError(null);
+    loadInProgressRef.current = true;
     
-    setDiagnostic(prev => ({
-      ...prev,
-      lastAttempt: new Date(),
-      status: 'loading',
-      period: { from: formatDateForErp(startDate), to: formatDateForErp(endDate) },
-    }));
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      setDiagnostic(prev => ({
+        ...prev,
+        lastAttempt: new Date(),
+        status: 'loading',
+        period: { from: formatDateForErp(startDate), to: formatDateForErp(endDate) },
+      }));
 
-    const isLargeRange = diffMonths >= 1;
+      const isLargeRange = diffMonths >= 1;
 
-    if (isLargeRange) {
-      // Use smart progressive loading with cache awareness
-      await loadErpDataProgressive(startDate, endDate, forceRefresh);
-    } else {
-      // For small ranges, check cache first (now async)
-      if (!forceRefresh) {
-        const cachedData = await getCachedData(startDate, endDate);
-        if (cachedData && cachedData.length > 0) {
-          console.log(`[Cache] Using cached data: ${cachedData.length} records`);
-          setRawData(cachedData);
-          setIsConnected(true);
-          setCurrentPeriod({ dateFrom: startDate, dateTo: endDate });
-          setDiagnostic(prev => ({
-            ...prev,
-            lastSuccess: new Date(),
-            lastError: null,
-            recordsLoaded: cachedData.length,
-            status: 'success',
-            period: { from: formatDateForErp(startDate), to: formatDateForErp(endDate) },
-          }));
-          setIsLoading(false);
-          toast.success(`${cachedData.length} registros carregados do cache (Supabase)`);
-          return;
+      if (isLargeRange) {
+        await loadErpDataProgressive(startDate, endDate, forceRefresh);
+      } else {
+        if (!forceRefresh) {
+          const cachedData = await getCachedData(startDate, endDate);
+          if (cachedData && cachedData.length > 0) {
+            console.log(`[Cache] Using cached data: ${cachedData.length} records`);
+            setRawData(cachedData);
+            setIsConnected(true);
+            setCurrentPeriod({ dateFrom: startDate, dateTo: endDate });
+            setDiagnostic(prev => ({
+              ...prev,
+              lastSuccess: new Date(),
+              lastError: null,
+              recordsLoaded: cachedData.length,
+              status: 'success',
+              period: { from: formatDateForErp(startDate), to: formatDateForErp(endDate) },
+            }));
+            setIsLoading(false);
+            toast.success(`${cachedData.length} registros carregados do cache (Supabase)`);
+            return;
+          }
         }
+        await loadErpDataSingle(startDate, endDate);
       }
-      await loadErpDataSingle(startDate, endDate);
+    } finally {
+      loadInProgressRef.current = false;
     }
   }, [getCachedData, loadErpDataProgressive, loadErpDataSingle]);
 
