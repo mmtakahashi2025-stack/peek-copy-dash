@@ -45,7 +45,6 @@ export default function Dashboard() {
   });
 
   const [kpis, setKpis] = useState<KpiData[]>([]);
-  const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
 
   // Trigger pulse animation when data changes
