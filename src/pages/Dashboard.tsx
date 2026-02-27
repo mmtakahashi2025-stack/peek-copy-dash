@@ -7,7 +7,7 @@ import { ProductRankingCard } from '@/components/dashboard/ProductRankingCard';
 import { SalesEvolutionChart } from '@/components/dashboard/SalesEvolutionChart';
 import { LoadingProgress } from '@/components/dashboard/LoadingProgress';
 import { useSheetData, KpiData } from '@/contexts/SheetDataContext';
-import { useUserRole } from '@/hooks/useUserRole';
+import { useUserRole } from '@/contexts/UserRoleContext';
 import { KeyRound, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SystemSettingsDialog } from '@/components/dashboard/SystemSettingsDialog';
@@ -190,7 +190,7 @@ export default function Dashboard() {
 
         {/* KPI Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {isLoading ? (
+          {kpis.length === 0 ? (
             <>
               <KPICardSkeleton />
               <KPICardSkeleton />

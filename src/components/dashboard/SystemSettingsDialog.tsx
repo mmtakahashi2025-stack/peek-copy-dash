@@ -8,7 +8,7 @@ import { Eye, EyeOff, Settings, Loader2, CheckCircle, XCircle, RefreshCw, Wrench
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useSheetData } from '@/contexts/SheetDataContext';
-import { useUserRole } from '@/hooks/useUserRole';
+import { useUserRole } from '@/contexts/UserRoleContext';
 import { LeadsImportSection } from './LeadsImportSection';
 
 interface SystemSettingsDialogProps {

@@ -9,7 +9,7 @@ import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays, subM
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { useSheetData } from '@/contexts/SheetDataContext';
-import { useUserRole } from '@/hooks/useUserRole';
+import { useUserRole } from '@/contexts/UserRoleContext';
 import { DateRange } from 'react-day-picker';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { CacheInfoButton } from './CacheInfoButton';

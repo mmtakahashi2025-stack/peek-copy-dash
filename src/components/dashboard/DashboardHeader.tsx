@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { useUserRole } from '@/hooks/useUserRole';
+import { useUserRole } from '@/contexts/UserRoleContext';
 import { LogOut, Target, Award, Users, Menu, LayoutDashboard, UserCog } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import comboLogo from '@/assets/combo-iguassu-logo.png';
