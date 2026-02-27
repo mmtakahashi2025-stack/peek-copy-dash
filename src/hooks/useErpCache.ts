@@ -2,7 +2,7 @@ import { useCallback, useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { RawSaleRow } from '@/contexts/SheetDataContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useUserRole } from '@/hooks/useUserRole';
+import { useUserRole } from '@/contexts/UserRoleContext';
 import { useAggregateCalculator } from '@/hooks/useAggregateCalculator';
 import {
   getLocalMonthData,
