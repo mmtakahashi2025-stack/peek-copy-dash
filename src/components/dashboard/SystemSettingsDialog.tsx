@@ -181,8 +181,8 @@ export function SystemSettingsDialog({ triggerClassName }: SystemSettingsDialogP
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                size="icon"
+                className="absolute right-0 top-0 h-full w-10 px-0 hover:bg-transparent z-10"
                 onClick={() => setShowPassword(!showPassword)}
               >
                 {showPassword ? (
